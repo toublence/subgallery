@@ -1,0 +1,55 @@
+name: SubGallery
+options:
+  bundleIdPrefix: com.namslab
+  deploymentTarget:
+    iOS: "18.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: 2CZQR7Q423
+    CODE_SIGN_STYLE: Automatic
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: 1.0
+    ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+targets:
+  SubGallery:
+    type: application
+    platform: iOS
+    sources:
+      - path: SubGallery
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.namslab.subgallery
+        PRODUCT_NAME: SubGallery
+        TARGETED_DEVICE_FAMILY: "1,2"
+    info:
+      path: SubGallery/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: SubGallery
+        LSApplicationCategoryType: public.app-category.photo-video
+        NSPhotoLibraryAddUsageDescription: 내보내기를 선택한 항목만 사진 앱에 저장합니다.
+        NSCameraUsageDescription: 사진과 동영상을 SubGallery에 촬영하기 위해 카메라를 사용합니다.
+        NSMicrophoneUsageDescription: 동영상에 소리를 녹음할 때 마이크를 사용합니다.
+        NSLocationWhenInUseUsageDescription: 사용자가 켠 경우 촬영 위치를 사진 정보에 기록합니다.
+        UIApplicationSupportsIndirectInputEvents: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        CFBundleURLTypes:
+          - CFBundleURLName: com.namslab.subgallery
+            CFBundleURLSchemes:
+              - subgallery
+    entitlements:
+      path: SubGallery/Resources/SubGallery.entitlements
+      properties:
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.com.namslab.subgallery
+        com.apple.developer.icloud-services:
+          - CloudKit

@@ -1,0 +1,23 @@
+# Xcode build output
+DerivedData/
+build/
+*.xcarchive
+*.dSYM
+
+# Per-user Xcode state
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+
+# Swift Package Manager
+.build/
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+
+# macOS
+.DS_Store
+
+# Local secrets and StoreKit testing state
+*.p8
+*.mobileprovision
+.env
+.env.*
