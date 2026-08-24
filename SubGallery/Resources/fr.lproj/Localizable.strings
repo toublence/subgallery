@@ -73,3 +73,17 @@
 "복원할 구매가 없습니다." = "Aucun achat à restaurer.";
 "현재 플랜" = "Offre actuelle";
 "플랜 선택" = "Choisir une offre";
+"사진은 따로. 정리는 자동으로." = "Photos séparées. Organisation automatique.";
+"자동 정리, iCloud 동기화, 고급 관리 기능으로 SubGallery를 더 편하게 사용하세요." = "Utilisez SubGallery plus facilement grâce au classement automatique, à la synchronisation iCloud et à la gestion avancée.";
+"자동 정리" = "Organisation automatique";
+"오늘, 7일, 30일, 완료할 때까지 필요한 기간이 지나면 자동으로 정리" = "Conservez jusqu’à aujourd’hui, 7 jours, 30 jours ou jusqu’à la fin, puis classez automatiquement.";
+"iPhone과 iPad에서 내 보관함을 그대로 사용" = "Retrouvez la même photothèque sur iPhone et iPad.";
+"고급 관리" = "Gestion avancée";
+"촬영 프리셋, 메타데이터 제거, 고급 내보내기와 관리 기능" = "Préréglages de capture, suppression des métadonnées et outils avancés d’export et de gestion.";
+"가장 인기 있는 플랜" = "Formule la plus populaire";
+"월 약 %@" = "Environ %@/mois";
+"한 번만 결제하고 계속 사용" = "Payez une fois et utilisez-la sans limite.";
+"연간으로 Premium 시작하기" = "Démarrer Premium à l’année";
+"월간으로 Premium 시작하기" = "Démarrer Premium au mois";
+"평생 이용권 구매하기" = "Acheter l’accès à vie";
+"Premium 기능 전체 보기" = "Voir toutes les fonctions Premium";

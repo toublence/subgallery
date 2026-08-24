@@ -139,9 +139,7 @@ struct SettingsView: View {
                         Label(L10n.text("응원하기"), systemImage: "heart.fill")
                     }
                     Button(L10n.text("앱 평가하기")) { requestReview() }
-                    Link(L10n.text("문의하기"), destination: URL(string: "mailto:support@namslab.com")!)
                     Link(L10n.text("개인정보 처리방침"), destination: URL(string: "https://motionfit.fit/subgallery/privacy/")!)
-                    Link(L10n.text("서비스 약관"), destination: URL(string: "https://namslab.com/terms")!)
                 } header: {
                     Text(L10n.text("지원"))
                 } footer: {
@@ -211,10 +209,6 @@ struct SettingsView: View {
             get: { pinLock },
             set: { enabled in
                 if enabled {
-                    guard purchases.isPremium else {
-                        showsPremium = true
-                        return
-                    }
                     showsPINSetup = true
                 } else {
                     showsPINVerification = true
@@ -283,6 +277,9 @@ struct SettingsView: View {
     }
 
     private var iCloudStatusText: String {
+        if iCloudStatus == "restartRequired" {
+            return L10n.text("iCloud 설정을 적용하려면 앱을 완전히 종료한 뒤 다시 실행해 주세요.")
+        }
         guard iCloudSync else { return L10n.text("현재 이 기기에만 저장됩니다.") }
         switch iCloudStatus {
         case "checking": return L10n.text("iCloud 계정을 확인하는 중…")
@@ -359,13 +356,17 @@ struct SettingsView: View {
 private struct CapturePresetListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \CapturePreset.sortOrder) private var presets: [CapturePreset]
+    @StateObject private var purchases = PurchaseManager.shared
     @State private var editingPreset: CapturePreset?
     @State private var createsPreset = false
 
     var body: some View {
         List {
             ForEach(presets) { preset in
-                Button { editingPreset = preset } label: {
+                Button {
+                    guard purchases.isPremium else { return }
+                    editingPreset = preset
+                } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(preset.displayName).foregroundStyle(.primary)
@@ -376,7 +377,7 @@ private struct CapturePresetListView: View {
                     }
                 }
                 .swipeActions {
-                    if !preset.isBuiltIn {
+                    if purchases.isPremium && !preset.isBuiltIn {
                         Button(L10n.text("삭제"), role: .destructive) {
                             modelContext.delete(preset)
                             try? modelContext.save()
@@ -390,6 +391,7 @@ private struct CapturePresetListView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { createsPreset = true } label: { Label(L10n.text("프리셋 추가"), systemImage: "plus") }
+                    .disabled(!purchases.isPremium)
             }
         }
         .sheet(item: $editingPreset) { preset in
@@ -413,6 +415,7 @@ private struct CapturePresetEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Album.sortOrder) private var albums: [Album]
+    @StateObject private var purchases = PurchaseManager.shared
     let preset: CapturePreset?
     @State private var name: String
     @State private var albumToken: String
@@ -470,6 +473,10 @@ private struct CapturePresetEditorView: View {
     }
 
     private func save() {
+        guard purchases.isPremium else {
+            dismiss()
+            return
+        }
         let target: CapturePreset
         if let preset {
             target = preset

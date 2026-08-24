@@ -22,6 +22,8 @@ schemes:
         SubGallery: all
     run:
       config: Debug
+      language: ko
+      region: KR
     test:
       config: Debug
       targets:

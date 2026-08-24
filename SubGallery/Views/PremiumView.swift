@@ -1,6 +1,27 @@
 import StoreKit
 import SwiftUI
 
+enum PremiumAccess {
+    private static let entitlementKey = "premium.active"
+
+    static var isActive: Bool {
+        UserDefaults.standard.bool(forKey: entitlementKey)
+    }
+
+    static func update(isActive: Bool) {
+        let defaults = UserDefaults.standard
+        defaults.set(isActive, forKey: entitlementKey)
+        guard !isActive else { return }
+
+        defaults.set(false, forKey: "privacy.stripMetadata")
+        defaults.set(false, forKey: "icloud.sync")
+        defaults.set(
+            defaults.bool(forKey: "icloud.active") ? "restartRequired" : "idle",
+            forKey: "icloud.syncStatus"
+        )
+    }
+}
+
 @MainActor
 final class PurchaseManager: ObservableObject {
     static let shared = PurchaseManager()
@@ -105,7 +126,7 @@ final class PurchaseManager: ObservableObject {
         }
     }
 
-    private func refreshEntitlements() async {
+    func refreshEntitlements() async {
         var activeIDs: Set<String> = []
         for await result in Transaction.currentEntitlements {
             guard case .verified(let transaction) = result,
@@ -113,7 +134,7 @@ final class PurchaseManager: ObservableObject {
             activeIDs.insert(transaction.productID)
         }
         purchasedProductIDs = activeIDs
-        UserDefaults.standard.set(isPremium, forKey: "premium.active")
+        PremiumAccess.update(isActive: isPremium)
     }
 }
 
@@ -121,6 +142,7 @@ struct PremiumView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var purchases = PurchaseManager.shared
     @State private var selectedID = PurchaseManager.yearlyID
+    @State private var showsComparison = false
 
     private let privacyURL = URL(string: "https://motionfit.fit/subgallery/privacy/")!
     private let termsURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
@@ -129,23 +151,34 @@ struct PremiumView: View {
         purchases.products.first { $0.id == selectedID }
     }
 
+    private var yearlyProduct: Product? {
+        purchases.products.first { $0.id == PurchaseManager.yearlyID }
+    }
+
+    private var secondaryProducts: [Product] {
+        purchases.products.filter {
+            $0.id == PurchaseManager.monthlyID || $0.id == PurchaseManager.lifetimeID
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 22) {
+                VStack(spacing: 16) {
                     hero
-                    PlanComparisonView()
+                    benefits
                     productSection
-                    purchaseSection
                     legalSection
+                    comparisonSection
                 }
-                .frame(maxWidth: 620)
-                .padding(.horizontal, 20)
-                .padding(.top, 14)
-                .padding(.bottom, 28)
+                .frame(maxWidth: 560)
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
                 .frame(maxWidth: .infinity)
             }
             .background(Color(uiColor: .systemGroupedBackground))
+            .safeAreaInset(edge: .bottom) { purchaseBar }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -170,31 +203,54 @@ struct PremiumView: View {
     }
 
     private var hero: some View {
-        VStack(spacing: 12) {
-            Image(systemName: purchases.isPremium ? "checkmark.seal.fill" : "sparkles")
-                .font(.system(size: 34, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 68, height: 68)
-                .background(Color.accentColor.opacity(0.12), in: Circle())
+        VStack(spacing: 7) {
+            HStack(spacing: 7) {
+                Image(systemName: purchases.isPremium ? "checkmark.seal.fill" : "sparkles")
+                    .foregroundStyle(Color.accentColor)
+                Text("SubGallery Premium")
+                    .font(.headline.bold())
+            }
 
-            Text(purchases.isPremium ? L10n.text("Premium을 사용 중입니다") : "SubGallery Premium")
-                .font(.largeTitle.bold())
+            Text(L10n.text("사진은 따로. 정리는 자동으로."))
+                .font(.title.bold())
                 .multilineTextAlignment(.center)
 
-            Text(L10n.text("핵심 기능은 무료로, 더 편리한 관리는 Premium으로 이용하세요."))
-                .font(.body)
+            Text(L10n.text("자동 정리, iCloud 동기화, 고급 관리 기능으로 SubGallery를 더 편하게 사용하세요."))
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var benefits: some View {
+        VStack(spacing: 0) {
+            PremiumBenefitRow(
+                symbol: "clock.arrow.circlepath",
+                title: "자동 정리",
+                detail: "오늘, 7일, 30일, 완료할 때까지 필요한 기간이 지나면 자동으로 정리"
+            )
+            Divider().padding(.leading, 52)
+            PremiumBenefitRow(
+                symbol: "icloud.fill",
+                title: "iCloud 동기화",
+                detail: "iPhone과 iPad에서 내 보관함을 그대로 사용"
+            )
+            Divider().padding(.leading, 52)
+            PremiumBenefitRow(
+                symbol: "slider.horizontal.3",
+                title: "고급 관리",
+                detail: "촬영 프리셋, 메타데이터 제거, 고급 내보내기와 관리 기능"
+            )
+        }
+        .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     @ViewBuilder
     private var productSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(L10n.text("플랜 선택"))
-                .font(.title2.bold())
-
-            FreePlanCard(isCurrent: !purchases.isPremium)
+                .font(.headline.bold())
 
             if purchases.isLoading {
                 ProgressView(L10n.text("상품을 불러오는 중…"))
@@ -211,26 +267,35 @@ struct PremiumView: View {
                     .buttonStyle(.bordered)
                 }
             } else {
-                ForEach(purchases.products) { product in
-                    PremiumProductCard(
-                        product: product,
-                        isSelected: selectedID == product.id,
-                        isPurchased: purchases.purchasedProductIDs.contains(product.id),
-                        select: { selectedID = product.id }
+                if let yearlyProduct {
+                    YearlyProductCard(
+                        product: yearlyProduct,
+                        isSelected: selectedID == yearlyProduct.id,
+                        isPurchased: purchases.purchasedProductIDs.contains(yearlyProduct.id),
+                        select: { selectedID = yearlyProduct.id }
                     )
+                }
+
+                HStack(alignment: .top, spacing: 10) {
+                    ForEach(secondaryProducts) { product in
+                        SecondaryProductCard(
+                            product: product,
+                            isSelected: selectedID == product.id,
+                            isPurchased: purchases.purchasedProductIDs.contains(product.id),
+                            select: { selectedID = product.id }
+                        )
+                    }
                 }
             }
         }
     }
 
-    private var purchaseSection: some View {
-        VStack(spacing: 12) {
+    private var purchaseBar: some View {
+        VStack(spacing: 7) {
             if purchases.purchasedProductIDs.contains(PurchaseManager.lifetimeID)
                 || selectedProduct.map({ purchases.purchasedProductIDs.contains($0.id) }) == true {
                 Button(L10n.text("완료")) { dismiss() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .frame(maxWidth: .infinity)
+                    .prominentPurchaseButton()
             } else if let selectedProduct {
                 Button {
                     Task { await purchases.purchase(selectedProduct) }
@@ -239,38 +304,42 @@ struct PremiumView: View {
                         if purchases.isPurchasing {
                             ProgressView().tint(.white)
                         } else {
-                            Text(L10n.text(selectedProduct.id == PurchaseManager.lifetimeID
-                                ? "평생 이용권 구매"
-                                : "구독 시작하기"))
+                            Text(purchaseButtonTitle(for: selectedProduct))
                         }
                     }
                     .font(.headline)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 50)
+                    .frame(height: 48)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(purchases.isPurchasing || !purchases.canMakePayments)
+            }
 
-                Text(L10n.text(selectedProduct.id == PurchaseManager.lifetimeID
-                    ? "한 번 결제하면 계속 이용할 수 있습니다."
-                    : "언제든지 취소할 수 있습니다."))
+            if selectedProduct?.subscription != nil {
+                Text(L10n.text("언제든지 취소할 수 있습니다."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
             }
 
-            Button {
-                Task { await purchases.restore() }
-            } label: {
-                if purchases.isRestoring {
-                    ProgressView()
-                } else {
-                    Text(L10n.text("구매 복원"))
+            HStack(spacing: 16) {
+                Button {
+                    Task { await purchases.restore() }
+                } label: {
+                    if purchases.isRestoring { ProgressView() }
+                    else { Text(L10n.text("구매 복원")) }
                 }
+                .disabled(purchases.isRestoring)
+                Link(L10n.text("이용 약관"), destination: termsURL)
+                Link(L10n.text("개인정보 처리방침"), destination: privacyURL)
             }
-            .font(.subheadline.weight(.semibold))
-            .disabled(purchases.isRestoring)
+            .font(.caption.weight(.semibold))
         }
+        .frame(maxWidth: 560)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) { Divider() }
     }
 
     private var legalSection: some View {
@@ -282,11 +351,28 @@ struct PremiumView: View {
                     .multilineTextAlignment(.center)
             }
 
-            HStack(spacing: 18) {
-                Link(L10n.text("이용 약관"), destination: termsURL)
-                Link(L10n.text("개인정보 처리방침"), destination: privacyURL)
-            }
-            .font(.caption.weight(.medium))
+        }
+    }
+
+    private var comparisonSection: some View {
+        DisclosureGroup(isExpanded: $showsComparison) {
+            PlanComparisonView()
+                .padding(.top, 10)
+        } label: {
+            Text(L10n.text("Premium 기능 전체 보기"))
+                .font(.subheadline.weight(.semibold))
+        }
+        .tint(.primary)
+        .padding(15)
+        .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func purchaseButtonTitle(for product: Product) -> String {
+        switch product.id {
+        case PurchaseManager.yearlyID: L10n.text("연간으로 Premium 시작하기")
+        case PurchaseManager.monthlyID: L10n.text("월간으로 Premium 시작하기")
+        case PurchaseManager.lifetimeID: L10n.text("평생 이용권 구매하기")
+        default: L10n.text("구독 시작하기")
         }
     }
 
@@ -308,88 +394,84 @@ struct PremiumView: View {
     }
 }
 
-private struct FreePlanCard: View {
-    let isCurrent: Bool
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "person.crop.circle")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(L10n.text("무료"))
-                    .font(.headline)
-                Text([
-                    L10n.text("사진 앱과 별도 보관"),
-                    L10n.text("촬영 및 가져오기"),
-                    L10n.text("앨범과 보관 기간")
-                ].joined(separator: " · "))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-            }
-            Spacer()
-            if isCurrent {
-                Text(L10n.text("현재 플랜"))
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(16)
-        .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.secondary.opacity(0.2)))
+private extension View {
+    func prominentPurchaseButton() -> some View {
+        self
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .frame(maxWidth: .infinity)
     }
 }
 
-private struct PremiumProductCard: View {
+private struct PremiumBenefitRow: View {
+    let symbol: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.headline)
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 32, height: 32)
+                .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L10n.text(title)).font(.subheadline.bold())
+                Text(L10n.text(detail))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+}
+
+private struct YearlyProductCard: View {
     let product: Product
     let isSelected: Bool
     let isPurchased: Bool
     let select: () -> Void
 
-    private var isYearly: Bool { product.id == PurchaseManager.yearlyID }
-    private var isLifetime: Bool { product.id == PurchaseManager.lifetimeID }
+    private var monthlyEquivalent: String {
+        (product.price / Decimal(12)).formatted(product.priceFormatStyle)
+    }
 
     var body: some View {
         Button(action: select) {
-            HStack(spacing: 14) {
+            HStack(spacing: 12) {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
+                    .font(.title2)
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
 
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 7) {
                         Text(product.displayName)
                             .font(.headline)
                             .foregroundStyle(.primary)
-                        if isYearly {
-                            Text(L10n.text("추천"))
-                                .font(.caption2.bold())
-                                .foregroundStyle(Color.accentColor)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(Color.accentColor.opacity(0.12), in: Capsule())
-                        } else if isLifetime {
-                            Text(L10n.text("한 번 구매"))
-                                .font(.caption2.bold())
-                                .foregroundStyle(.secondary)
-                        }
+                        Text(L10n.text("추천"))
+                            .font(.caption2.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Color.accentColor, in: Capsule())
                     }
-
-                    if !product.description.isEmpty {
-                        Text(product.description)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
+                    Text(L10n.text("가장 인기 있는 플랜"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Spacer(minLength: 8)
 
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(product.displayPrice)
-                        .font(.headline)
+                        .font(.title3.bold())
                         .foregroundStyle(.primary)
+                    Text(L10n.format("월 약 %@", monthlyEquivalent))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     if isPurchased {
                         Label(L10n.text("구매됨"), systemImage: "checkmark")
                             .font(.caption2)
@@ -397,10 +479,55 @@ private struct PremiumProductCard: View {
                     }
                 }
             }
-            .padding(16)
-            .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(15)
+            .background(Color.accentColor.opacity(isSelected ? 0.08 : 0.03), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.accentColor.opacity(isSelected ? 1 : 0.35), lineWidth: isSelected ? 2 : 1)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct SecondaryProductCard: View {
+    let product: Product
+    let isSelected: Bool
+    let isPurchased: Bool
+    let select: () -> Void
+
+    private var isLifetime: Bool { product.id == PurchaseManager.lifetimeID }
+
+    var body: some View {
+        Button(action: select) {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    Spacer()
+                    Text(product.displayPrice)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.primary)
+                }
+                Text(product.displayName)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                Text(L10n.text(isLifetime ? "한 번만 결제하고 계속 사용" : "언제든지 취소할 수 있습니다."))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                if isPurchased {
+                    Label(L10n.text("구매됨"), systemImage: "checkmark")
+                        .font(.caption2)
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
+            .padding(13)
+            .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.2), lineWidth: isSelected ? 2 : 1)
             }
         }
@@ -414,17 +541,13 @@ private struct PlanComparisonView: View {
         ("촬영 및 가져오기", true, true),
         ("앨범과 보관 기간", true, true),
         ("iCloud 동기화", false, true),
-        ("PIN 잠금", false, true),
+        ("PIN 잠금", true, true),
         ("촬영 프리셋 설정", false, true),
         ("개인정보 보호 내보내기", false, true)
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(L10n.text("플랜 비교"))
-                .font(.title2.bold())
-
-            VStack(spacing: 0) {
+        VStack(spacing: 0) {
                 HStack {
                     Text(L10n.text("기능")).frame(maxWidth: .infinity, alignment: .leading)
                     Text(L10n.text("무료")).frame(width: 58)
@@ -449,10 +572,9 @@ private struct PlanComparisonView: View {
                     .frame(minHeight: 44)
                     if index < rows.count - 1 { Divider().padding(.leading, 14) }
                 }
-            }
-            .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.secondary.opacity(0.2)))
         }
+        .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.secondary.opacity(0.2)))
     }
 
     private func availability(_ available: Bool) -> some View {

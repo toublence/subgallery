@@ -26,7 +26,8 @@ enum MediaExportService {
             throw MediaExportError.photosAccessDenied
         }
 
-        let stripsMetadata = UserDefaults.standard.bool(forKey: "privacy.stripMetadata")
+        let stripsMetadata = PremiumAccess.isActive
+            && UserDefaults.standard.bool(forKey: "privacy.stripMetadata")
         let urls = try await preparedURLs(for: items, strippingMetadata: stripsMetadata)
         defer { cleanupPreparedURLs(urls) }
 
@@ -41,7 +42,7 @@ enum MediaExportService {
 
     static func preparedURLs(for items: [MediaItem], strippingMetadata: Bool) async throws -> [URL] {
         guard !items.isEmpty else { throw MediaExportError.noItems }
-        guard strippingMetadata else {
+        guard strippingMetadata && PremiumAccess.isActive else {
             return items.map(\.mediaURL)
         }
 

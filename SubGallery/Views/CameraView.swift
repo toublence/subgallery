@@ -528,6 +528,7 @@ struct CameraView: View {
         RetentionService.apply(retention, customDate: customDate, to: item)
         modelContext.insert(item)
         try? modelContext.save()
+        ReviewPromptPolicy.recordSuccessfulSave()
         OCRService.enqueue(item, in: modelContext)
         lastCapture = item
         UIImpactFeedbackGenerator(style: .light).impactOccurred()

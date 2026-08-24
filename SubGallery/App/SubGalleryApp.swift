@@ -41,6 +41,67 @@ enum StoreScreenshotMode {
     }
 }
 
+@MainActor
+enum ReviewPromptPolicy {
+    private static let successfulSaveCountKey = "review.successfulSaveCount"
+    private static let activeDaysKey = "review.activeDays"
+    private static let lastRequestedVersionKey = "review.lastRequestedVersion"
+    private static let lastRequestedDateKey = "review.lastRequestedDate"
+    private static let minimumSuccessfulSaves = 5
+    private static let minimumActiveDays = 3
+    private static let requestCooldown: TimeInterval = 60 * 24 * 60 * 60
+
+    static func recordActiveDay() {
+        guard isEligibleEnvironment else { return }
+        let defaults = UserDefaults.standard
+        let today = Calendar.current.startOfDay(for: .now).timeIntervalSince1970
+        var days = storedActiveDays
+        guard !days.contains(today) else { return }
+        days.append(today)
+        defaults.set(Array(days.suffix(30)), forKey: activeDaysKey)
+    }
+
+    static func recordSuccessfulSave() {
+        guard isEligibleEnvironment else { return }
+        let defaults = UserDefaults.standard
+        defaults.set(defaults.integer(forKey: successfulSaveCountKey) + 1, forKey: successfulSaveCountKey)
+    }
+
+    static var shouldRequest: Bool {
+        guard isEligibleEnvironment,
+              UserDefaults.standard.bool(forKey: "onboarding.completed"),
+              UserDefaults.standard.integer(forKey: successfulSaveCountKey) >= minimumSuccessfulSaves,
+              storedActiveDays.count >= minimumActiveDays,
+              UserDefaults.standard.string(forKey: lastRequestedVersionKey) != currentVersion else {
+            return false
+        }
+        let lastRequest = UserDefaults.standard.double(forKey: lastRequestedDateKey)
+        return lastRequest == 0 || Date.now.timeIntervalSince1970 - lastRequest >= requestCooldown
+    }
+
+    static func markRequested() {
+        let defaults = UserDefaults.standard
+        defaults.set(currentVersion, forKey: lastRequestedVersionKey)
+        defaults.set(Date.now.timeIntervalSince1970, forKey: lastRequestedDateKey)
+        defaults.set(0, forKey: successfulSaveCountKey)
+    }
+
+    private static var storedActiveDays: [TimeInterval] {
+        UserDefaults.standard.array(forKey: activeDaysKey)?.compactMap {
+            ($0 as? NSNumber)?.doubleValue
+        } ?? []
+    }
+
+    private static var currentVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+    }
+
+    private static var isEligibleEnvironment: Bool {
+        !StoreScreenshotMode.isEnabled
+            && !ProcessInfo.processInfo.arguments.contains("-ui-testing")
+    }
+}
+
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     private var cloudEventObserver: NSObjectProtocol?
 
@@ -227,6 +288,8 @@ struct SubGalleryApp: App {
                     applyStoreScreenshotRoute()
                     return
                 }
+                ReviewPromptPolicy.recordActiveDay()
+                await PurchaseManager.shared.refreshEntitlements()
                 #if DEBUG
                 await prepareUITestFixtureIfNeeded()
                 if ProcessInfo.processInfo.arguments.contains("-cloudkit-diagnostic") {
@@ -262,6 +325,7 @@ struct SubGalleryApp: App {
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
                 case .active:
+                    ReviewPromptPolicy.recordActiveDay()
                     obscuresContent = false
                     openPendingReminderIfNeeded()
                     if dataStore.errorMessage == nil {
@@ -668,7 +732,8 @@ struct DataStoreBootstrap {
             let container = try! ModelContainer(for: schema, configurations: [configuration])
             return DataStoreBootstrap(container: container, errorMessage: nil, usesCloudKit: false)
         }
-        let cloudRequested = UserDefaults.standard.bool(forKey: "icloud.sync")
+        let cloudRequested = PremiumAccess.isActive
+            && UserDefaults.standard.bool(forKey: "icloud.sync")
         do {
             let applicationSupport = FileManager.default.urls(
                 for: .applicationSupportDirectory,

@@ -1,4 +1,5 @@
 import PhotosUI
+import StoreKit
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
@@ -39,6 +40,7 @@ enum AlbumDestination: Hashable {
 struct LibraryView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.requestReview) private var requestReview
     @Query(sort: \Album.sortOrder) private var albums: [Album]
     @Query(sort: \MediaItem.createdAt, order: .reverse) private var media: [MediaItem]
     @Binding var isCameraPresented: Bool
@@ -199,7 +201,13 @@ struct LibraryView: View {
                 SharedInboxService.publishConfiguration(albums: albums)
                 restoreLastDestinationIfNeeded()
             }
-            .onAppear { restoreLastDestinationIfNeeded() }
+            .onAppear {
+                restoreLastDestinationIfNeeded()
+                requestReviewIfAppropriate()
+            }
+            .onChange(of: isCameraPresented) { _, isPresented in
+                if !isPresented { requestReviewIfAppropriate() }
+            }
         }
         .alert(L10n.text("새 앨범"), isPresented: $showsNewAlbum) {
             TextField(L10n.text("앨범 이름"), text: $newAlbumName)
@@ -527,7 +535,18 @@ struct LibraryView: View {
         RetentionService.apply(policy, customDate: customDate, to: item)
         modelContext.insert(item)
         try? modelContext.save()
+        ReviewPromptPolicy.recordSuccessfulSave()
         OCRService.enqueue(item, in: modelContext)
+        requestReviewIfAppropriate()
+    }
+
+    private func requestReviewIfAppropriate() {
+        guard ReviewPromptPolicy.shouldRequest else { return }
+        ReviewPromptPolicy.markRequested()
+        Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            requestReview()
+        }
     }
 }
 
