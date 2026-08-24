@@ -1,15 +1,19 @@
+import AVFoundation
 import Photos
 import SwiftUI
+import UniformTypeIdentifiers
 import UIKit
 
 enum MediaExportError: LocalizedError {
     case photosAccessDenied
     case noItems
+    case exportFailed
 
     var errorDescription: String? {
         switch self {
         case .photosAccessDenied: L10n.text("사진 앱에 추가할 권한이 필요합니다.")
         case .noItems: L10n.text("내보낼 항목이 없습니다.")
+        case .exportFailed: L10n.text("메타데이터를 제거한 파일을 만들 수 없습니다.")
         }
     }
 }
@@ -22,13 +26,84 @@ enum MediaExportService {
             throw MediaExportError.photosAccessDenied
         }
 
+        let stripsMetadata = UserDefaults.standard.bool(forKey: "privacy.stripMetadata")
+        let urls = try await preparedURLs(for: items, strippingMetadata: stripsMetadata)
+        defer { cleanupPreparedURLs(urls) }
+
         try await PHPhotoLibrary.shared().performChanges {
-            for item in items {
+            for (item, url) in zip(items, urls) {
                 let request = PHAssetCreationRequest.forAsset()
                 let type: PHAssetResourceType = item.kind == .video ? .video : .photo
-                request.addResource(with: type, fileURL: MediaStorage.url(for: item.localPath), options: nil)
+                request.addResource(with: type, fileURL: url, options: nil)
             }
         }
+    }
+
+    static func preparedURLs(for items: [MediaItem], strippingMetadata: Bool) async throws -> [URL] {
+        guard !items.isEmpty else { throw MediaExportError.noItems }
+        guard strippingMetadata else {
+            return items.map { MediaStorage.url(for: $0.localPath) }
+        }
+
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "SubGalleryExport-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        do {
+            var urls: [URL] = []
+            for item in items {
+                let source = MediaStorage.url(for: item.localPath)
+                if item.kind == .photo {
+                    urls.append(try metadataFreePhoto(source: source, destinationDirectory: directory))
+                } else {
+                    urls.append(try await metadataFreeVideo(source: source, destinationDirectory: directory))
+                }
+            }
+            return urls
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw error
+        }
+    }
+
+    static func metadataFreeCopy(of item: MediaItem) async throws -> StoredMedia {
+        let urls = try await preparedURLs(for: [item], strippingMetadata: true)
+        defer { cleanupPreparedURLs(urls) }
+        guard let url = urls.first else { throw MediaExportError.exportFailed }
+        let type: UTType = item.kind == .video ? .quickTimeMovie : (url.pathExtension.lowercased() == "png" ? .png : .jpeg)
+        return try await MediaStorage.shared.store(fileAt: url, type: type)
+    }
+
+    static func cleanupPreparedURLs(_ urls: [URL]) {
+        let directories = Set(urls.map { $0.deletingLastPathComponent() }.filter {
+            $0.lastPathComponent.hasPrefix("SubGalleryExport-")
+        })
+        directories.forEach { try? FileManager.default.removeItem(at: $0) }
+    }
+
+    private static func metadataFreePhoto(source: URL, destinationDirectory: URL) throws -> URL {
+        guard let image = UIImage(contentsOfFile: source.path) else { throw MediaExportError.exportFailed }
+        let normalized = UIGraphicsImageRenderer(size: image.size).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+        }
+        let keepsPNG = source.pathExtension.lowercased() == "png"
+        guard let data = keepsPNG ? normalized.pngData() : normalized.jpegData(compressionQuality: 0.96) else {
+            throw MediaExportError.exportFailed
+        }
+        let baseName = source.deletingPathExtension().lastPathComponent
+        let destination = destinationDirectory.appending(path: "\(baseName).\(keepsPNG ? "png" : "jpg")")
+        try data.write(to: destination, options: .atomic)
+        return destination
+    }
+
+    private static func metadataFreeVideo(source: URL, destinationDirectory: URL) async throws -> URL {
+        let asset = AVURLAsset(url: source)
+        guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else {
+            throw MediaExportError.exportFailed
+        }
+        exporter.metadata = []
+        let destination = destinationDirectory.appending(path: "\(source.deletingPathExtension().lastPathComponent).mov")
+        try await exporter.export(to: destination, as: .mov)
+        return destination
     }
 }
 

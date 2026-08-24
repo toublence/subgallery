@@ -25,6 +25,12 @@ struct StoredMediaMetadata: Sendable {
     let longitude: Double?
 }
 
+struct MediaMetadataEntry: Identifiable, Sendable {
+    let id: String
+    let title: String
+    let value: String
+}
+
 actor MediaStorage {
     static let shared = MediaStorage()
 
@@ -91,6 +97,64 @@ actor MediaStorage {
         }
         let values = imageLocationMetadata(from: properties)
         return StoredMediaMetadata(capturedAt: values.0, latitude: values.1, longitude: values.2)
+    }
+
+    func detailedMetadata(for relativePath: String) -> [MediaMetadataEntry] {
+        let url = Self.url(for: relativePath)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+            return []
+        }
+
+        let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+        let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any]
+        let gps = properties[kCGImagePropertyGPSDictionary] as? [CFString: Any]
+        var entries: [MediaMetadataEntry] = []
+
+        func append(_ id: String, _ title: String, _ value: String?) {
+            guard let value, !value.isEmpty else { return }
+            entries.append(MediaMetadataEntry(id: id, title: title, value: value))
+        }
+
+        append("cameraMake", "제조사", tiff?[kCGImagePropertyTIFFMake] as? String)
+        append("cameraModel", "카메라", tiff?[kCGImagePropertyTIFFModel] as? String)
+        append("lensModel", "렌즈", exif?[kCGImagePropertyExifLensModel] as? String)
+        append("software", "소프트웨어", tiff?[kCGImagePropertyTIFFSoftware] as? String)
+
+        if let focalLength = metadataNumber(exif?[kCGImagePropertyExifFocalLength]) {
+            append("focalLength", "초점 거리", formattedNumber(focalLength, maximumFractionDigits: 1) + " mm")
+        }
+        if let focalLength35 = metadataNumber(exif?[kCGImagePropertyExifFocalLenIn35mmFilm]) {
+            append("focalLength35", "35mm 환산", formattedNumber(focalLength35, maximumFractionDigits: 0) + " mm")
+        }
+        if let aperture = metadataNumber(exif?[kCGImagePropertyExifFNumber]) {
+            append("aperture", "조리개", "ƒ/" + formattedNumber(aperture, maximumFractionDigits: 1))
+        }
+        if let exposure = metadataNumber(exif?[kCGImagePropertyExifExposureTime]), exposure > 0 {
+            let value = exposure < 1
+                ? "1/\(Int((1 / exposure).rounded()))초"
+                : formattedNumber(exposure, maximumFractionDigits: 2) + "초"
+            append("exposure", "셔터 속도", value)
+        }
+        if let isoValues = exif?[kCGImagePropertyExifISOSpeedRatings] as? [NSNumber],
+           let iso = isoValues.first {
+            append("iso", "ISO", String(iso.intValue))
+        }
+        if let profile = properties[kCGImagePropertyProfileName] as? String {
+            append("colorProfile", "색상 프로파일", profile)
+        }
+        if let altitude = metadataNumber(gps?[kCGImagePropertyGPSAltitude]) {
+            append("altitude", "고도", formattedNumber(altitude, maximumFractionDigits: 1) + " m")
+        }
+        let location = imageLocationMetadata(from: properties)
+        if let latitude = location.1, let longitude = location.2 {
+            append(
+                "location",
+                "위치",
+                "\(formattedNumber(latitude, maximumFractionDigits: 6)), \(formattedNumber(longitude, maximumFractionDigits: 6))"
+            )
+        }
+        return entries
     }
 
     private func prepareDirectories() throws {
@@ -196,5 +260,14 @@ actor MediaStorage {
         if let number = value as? NSNumber { return number.doubleValue }
         if let text = value as? String { return Double(text) }
         return nil
+    }
+
+    private func formattedNumber(_ value: Double, maximumFractionDigits: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = .current
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = maximumFractionDigits
+        formatter.minimumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: value)) ?? String(value)
     }
 }

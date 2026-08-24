@@ -72,11 +72,11 @@ struct SettingsView: View {
                     Toggle(biometricLockTitle, isOn: biometricLockToggle)
                         .disabled(!biometricsAvailable && !biometricLock)
                     Toggle("앱 전환기에서 가리기", isOn: $appSwitcherProtection)
-                    Toggle("내보낼 때 위치 정보 제거", isOn: $stripsMetadata)
+                    Toggle("내보낼 때 메타데이터 제거", isOn: $stripsMetadata)
                 } header: {
                     Text("개인정보 보호")
                 } footer: {
-                    Text(biometricPrivacyDescription)
+                    Text(biometricPrivacyDescription + " " + L10n.text("메타데이터 제거를 켜면 Photos, Files와 공유로 내보낼 때 위치·기기·촬영 정보를 제거합니다."))
                 }
 
                 Section("iCloud") {

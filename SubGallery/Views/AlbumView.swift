@@ -60,6 +60,7 @@ struct AlbumView: View {
     let destination: AlbumDestination
     @Binding var isCameraPresented: Bool
     @AppStorage("camera.destinationAlbumID") private var cameraDestinationAlbumID = ""
+    @AppStorage("privacy.stripMetadata") private var stripsMetadata = false
 
     @State private var selection = Set<UUID>()
     @State private var isSelecting = false
@@ -68,6 +69,7 @@ struct AlbumView: View {
     @State private var showsRetentionSheet = false
     @State private var showsShareSheet = false
     @State private var showsFilesExporter = false
+    @State private var preparedExportURLs: [URL] = []
     @State private var deleteConfirmation = false
     @State private var photosSelection: [PhotosPickerItem] = []
     @State private var importError: String?
@@ -211,10 +213,10 @@ struct AlbumView: View {
                             Button { saveSelectedToPhotos() } label: {
                                 Label("사진 앱에 저장", systemImage: "photo.badge.arrow.down")
                             }
-                            Button { showsFilesExporter = true } label: {
+                            Button { prepareFilesExport(selectedItems) } label: {
                                 Label("파일 앱으로 내보내기", systemImage: "folder")
                             }
-                            Button { showsShareSheet = true } label: {
+                            Button { prepareShare(selectedItems) } label: {
                                 Label("공유", systemImage: "square.and.arrow.up")
                             }
                             Divider()
@@ -256,11 +258,11 @@ struct AlbumView: View {
                 showsRetentionSheet = false
             }
         }
-        .sheet(isPresented: $showsShareSheet) {
-            ActivityShareSheet(urls: selectedItems.map { MediaStorage.url(for: $0.localPath) })
+        .sheet(isPresented: $showsShareSheet, onDismiss: cleanupPreparedExport) {
+            ActivityShareSheet(urls: preparedExportURLs)
         }
-        .sheet(isPresented: $showsFilesExporter) {
-            FilesExportPicker(urls: selectedItems.map { MediaStorage.url(for: $0.localPath) })
+        .sheet(isPresented: $showsFilesExporter, onDismiss: cleanupPreparedExport) {
+            FilesExportPicker(urls: preparedExportURLs)
         }
         .onChange(of: photosSelection) { _, selection in importPhotos(selection, into: userAlbum) }
         .alert("가져올 수 없음", isPresented: Binding(
@@ -413,7 +415,7 @@ struct AlbumView: View {
                     Button(policy.title) { RetentionService.apply(policy, to: item) }
                 }
             }
-            ShareLink(item: MediaStorage.url(for: item.localPath)) { Label("공유", systemImage: "square.and.arrow.up") }
+            Button { prepareShare([item]) } label: { Label("공유", systemImage: "square.and.arrow.up") }
             Button(role: .destructive) {
                 Task { await MediaLifecycleService.moveToRecentlyDeleted(item) }
             } label: { Label("삭제", systemImage: "trash") }
@@ -541,6 +543,33 @@ struct AlbumView: View {
                 bulkMessage = error.localizedDescription
             }
         }
+    }
+
+    private func prepareShare(_ items: [MediaItem]) {
+        prepareExport(items) { showsShareSheet = true }
+    }
+
+    private func prepareFilesExport(_ items: [MediaItem]) {
+        prepareExport(items) { showsFilesExporter = true }
+    }
+
+    private func prepareExport(_ items: [MediaItem], present: @escaping @MainActor () -> Void) {
+        Task {
+            do {
+                let urls = try await MediaExportService.preparedURLs(for: items, strippingMetadata: stripsMetadata)
+                await MainActor.run {
+                    preparedExportURLs = urls
+                    present()
+                }
+            } catch {
+                await MainActor.run { bulkMessage = error.localizedDescription }
+            }
+        }
+    }
+
+    private func cleanupPreparedExport() {
+        MediaExportService.cleanupPreparedURLs(preparedExportURLs)
+        preparedExportURLs = []
     }
 
     private func deleteSelected() {

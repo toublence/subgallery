@@ -10,6 +10,7 @@ struct MediaViewer: View {
     let items: [MediaItem]
     let initialID: UUID
     let isRecentlyDeleted: Bool
+    @AppStorage("privacy.stripMetadata") private var stripsMetadata = false
     @State private var selectedID: UUID
     @State private var showsInfo = false
     @State private var showsDelete = false
@@ -17,6 +18,8 @@ struct MediaViewer: View {
     @State private var showsReminder = false
     @State private var showsAlbumMove = false
     @State private var showsEditor = false
+    @State private var showsShareSheet = false
+    @State private var preparedShareURLs: [URL] = []
 
     init(items: [MediaItem], initialID: UUID, isRecentlyDeleted: Bool) {
         self.items = items
@@ -72,9 +75,16 @@ struct MediaViewer: View {
         .sheet(isPresented: $showsRetention) { if let current { RetentionPickerView(item: current) } }
         .sheet(isPresented: $showsReminder) { if let current { ReminderPickerView(item: current) } }
         .sheet(isPresented: $showsAlbumMove) { albumMovePicker }
+        .sheet(isPresented: $showsShareSheet, onDismiss: cleanupPreparedShare) {
+            ActivityShareSheet(urls: preparedShareURLs)
+        }
         .fullScreenCover(isPresented: $showsEditor) {
             if let current {
-                PhotoEditorView(item: current) { _ in }
+                if current.kind == .photo {
+                    PhotoEditorView(item: current) { _ in }
+                } else {
+                    VideoEditorView(item: current) { _ in }
+                }
             }
         }
         .confirmationDialog("이 항목을 삭제할까요?", isPresented: $showsDelete) {
@@ -85,10 +95,8 @@ struct MediaViewer: View {
     @ViewBuilder
     private func actionsMenu(for item: MediaItem) -> some View {
         Menu {
-            if item.kind == .photo {
-                Button { showsEditor = true } label: { Label("편집", systemImage: "slider.horizontal.3") }
-                Divider()
-            }
+            Button { showsEditor = true } label: { Label("편집", systemImage: "slider.horizontal.3") }
+            Divider()
             Button {
                 item.isPinned.toggle()
                 if !item.isPinned && RetentionService.shouldMoveToRecentlyDeleted(item) {
@@ -107,13 +115,32 @@ struct MediaViewer: View {
             Button { showsRetention = true } label: { Label("보관 기간", systemImage: "clock") }
             Button { showsAlbumMove = true } label: { Label("앨범으로 이동", systemImage: "folder") }
                 .disabled(albums.isEmpty)
-            ShareLink(item: MediaStorage.url(for: item.localPath)) { Label("공유", systemImage: "square.and.arrow.up") }
+            Button { prepareShare(for: item) } label: { Label("공유", systemImage: "square.and.arrow.up") }
             Button { showsInfo = true } label: { Label("정보", systemImage: "info.circle") }
             Divider()
             Button(role: .destructive) { showsDelete = true } label: { Label("삭제", systemImage: "trash") }
         } label: {
             Label("사진 동작", systemImage: "ellipsis.circle")
         }
+    }
+
+    private func prepareShare(for item: MediaItem) {
+        Task {
+            do {
+                let urls = try await MediaExportService.preparedURLs(for: [item], strippingMetadata: stripsMetadata)
+                await MainActor.run {
+                    preparedShareURLs = urls
+                    showsShareSheet = true
+                }
+            } catch {
+                // 정보 화면에서 원본 파일 공유를 다시 선택할 수 있으므로 실패 시 UI를 막지 않습니다.
+            }
+        }
+    }
+
+    private func cleanupPreparedShare() {
+        MediaExportService.cleanupPreparedURLs(preparedShareURLs)
+        preparedShareURLs = []
     }
 
     private var albumMovePicker: some View {
@@ -193,6 +220,9 @@ struct MediaInfoView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     let item: MediaItem
+    @State private var metadataEntries: [MediaMetadataEntry] = []
+    @State private var isCreatingCleanCopy = false
+    @State private var metadataMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -216,12 +246,84 @@ struct MediaInfoView: View {
                     }
                     .disabled(item.ocrStatus == .processing)
                 }
+                if !metadataEntries.isEmpty {
+                    Section("촬영 메타데이터") {
+                        ForEach(metadataEntries) { entry in
+                            LabeledContent(L10n.text(entry.title), value: entry.value)
+                        }
+                    }
+                }
+                Section("개인정보 보호") {
+                    Button {
+                        createMetadataFreeCopy()
+                    } label: {
+                        Label("메타데이터 제거본 만들기", systemImage: "shield.lefthalf.filled")
+                    }
+                    .disabled(isCreatingCleanCopy)
+                    if isCreatingCleanCopy { ProgressView("제거본 만드는 중…") }
+                    Text("위치, 카메라, 렌즈와 촬영 정보를 제거한 새 파일을 만듭니다. 원본은 유지됩니다.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
             .navigationTitle("정보")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("완료") { dismiss() } } }
         }
         .presentationDetents([.large])
+        .task {
+            guard item.kind == .photo else { return }
+            metadataEntries = await MediaStorage.shared.detailedMetadata(for: item.localPath)
+        }
+        .alert("개인정보 보호", isPresented: Binding(
+            get: { metadataMessage != nil },
+            set: { if !$0 { metadataMessage = nil } }
+        )) {
+            Button("확인", role: .cancel) { }
+        } message: {
+            Text(metadataMessage ?? "")
+        }
+    }
+
+    private func createMetadataFreeCopy() {
+        isCreatingCleanCopy = true
+        Task {
+            do {
+                let stored = try await MediaExportService.metadataFreeCopy(of: item)
+                await MainActor.run {
+                    let copy = MediaItem(
+                        kind: item.kind,
+                        source: item.source,
+                        localPath: stored.relativePath,
+                        thumbnailPath: stored.thumbnailRelativePath,
+                        fileName: stored.fileName,
+                        createdAt: .now,
+                        albumID: item.albumID,
+                        expirationDate: item.expirationDate,
+                        fileSize: stored.fileSize,
+                        width: stored.width,
+                        height: stored.height,
+                        duration: stored.duration
+                    )
+                    copy.expirationTypeRaw = item.expirationTypeRaw
+                    copy.waitingForCompletion = item.waitingForCompletion
+                    copy.isPinned = item.isPinned
+                    copy.note = item.note
+                    copy.latitude = nil
+                    copy.longitude = nil
+                    modelContext.insert(copy)
+                    try? modelContext.save()
+                    if copy.kind == .photo { OCRService.enqueue(copy, in: modelContext) }
+                    isCreatingCleanCopy = false
+                    metadataMessage = L10n.text("메타데이터를 제거한 새 파일을 저장했습니다.")
+                }
+            } catch {
+                await MainActor.run {
+                    isCreatingCleanCopy = false
+                    metadataMessage = error.localizedDescription
+                }
+            }
+        }
     }
 
     private var ocrStatusText: String {
