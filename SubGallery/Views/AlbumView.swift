@@ -82,6 +82,7 @@ struct AlbumView: View {
     init(destination: AlbumDestination, isCameraPresented: Binding<Bool>) {
         self.destination = destination
         _isCameraPresented = isCameraPresented
+        _isSelecting = State(initialValue: StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "batch")
         let key = destination.preferencesKey
         _gridMode = State(initialValue: AlbumGridMode(
             rawValue: UserDefaults.standard.string(forKey: "album.view.\(key)") ?? ""
@@ -177,6 +178,16 @@ struct AlbumView: View {
         .overlay {
             if items.isEmpty {
                 ContentUnavailableView(L10n.text("항목 없음"), systemImage: "photo", description: Text(L10n.text("촬영하거나 미디어를 가져오면 여기에 표시됩니다.")))
+            }
+        }
+        .onAppear {
+            if StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "batch" {
+                selection = Set(items.map(\.id))
+            }
+        }
+        .onChange(of: items.map(\.id)) { _, ids in
+            if StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "batch" {
+                selection = Set(ids)
             }
         }
         .navigationTitle(title)

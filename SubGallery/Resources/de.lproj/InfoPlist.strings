@@ -3,3 +3,4 @@
 "NSLocationWhenInUseUsageDescription" = "Der Standort wird nur gespeichert, wenn Sie dies für Fotos auswählen.";
 "NSPhotoLibraryUsageDescription" = "Der Fotozugriff wird zum Importieren ausgewählter Fotos verwendet.";
 "NSPhotoLibraryAddUsageDescription" = "Der Fotozugriff wird zum Exportieren ausgewählter Elemente verwendet.";
+"NSUserTrackingUsageDescription" = "Erlaube Gerätekennungen, um die Werbeleistung zu messen und relevantere Werbung bereitzustellen.";

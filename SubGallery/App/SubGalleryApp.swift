@@ -1,7 +1,9 @@
 import AppIntents
+import AppTrackingTransparency
 import CloudKit
 import CoreData
 import CryptoKit
+import FirebaseCore
 import Security
 import SwiftData
 import SwiftUI
@@ -10,6 +12,33 @@ import UserNotifications
 
 extension Notification.Name {
     static let openReminderMedia = Notification.Name("openReminderMedia")
+    static let replayOnboarding = Notification.Name("replayOnboarding")
+}
+
+enum StoreScreenshotMode {
+    static let isEnabled = ProcessInfo.processInfo.arguments.contains("-store-screenshot")
+
+    static var screen: String {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-store-screen"), arguments.indices.contains(index + 1) else {
+            return "library"
+        }
+        return arguments[index + 1]
+    }
+
+    static var searchQuery: String {
+        switch AppLanguage.selected.resolvedIdentifier {
+        case "de": "Berlin"
+        case "es": "Madrid"
+        case "fr": "Paris"
+        case "ja": "東京"
+        case "zh-Hans": "上海"
+        case "zh-Hant": "台北"
+        case "ar": "دبي"
+        case "ko": "제주"
+        default: "Seattle"
+        }
+    }
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -19,6 +48,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        if FirebaseApp.app() == nil {
+            FirebaseApp.configure()
+        }
         UNUserNotificationCenter.current().delegate = self
         application.registerForRemoteNotifications()
         cloudEventObserver = NotificationCenter.default.addObserver(
@@ -93,7 +125,11 @@ struct SubGalleryApp: App {
     @State private var isUnlocked = false
     @State private var deepLink: MediaDeepLink?
     @State private var requestedLibraryDestination: AlbumDestination?
+    @State private var requestedOnboardingAction: OnboardingAction?
+    @State private var isRequestingTrackingAuthorization = false
     @State private var didApplyInitialStartScreen = false
+    @State private var showsOnboarding = !StoreScreenshotMode.isEnabled
+        && !UserDefaults.standard.bool(forKey: "onboarding.completed")
     @AppStorage("privacy.pinLock") private var pinLock = false
     @AppStorage("privacy.appSwitcherProtection") private var appSwitcherProtection = true
     @AppStorage("app.language") private var appLanguageRaw = AppLanguage.system.rawValue
@@ -101,6 +137,7 @@ struct SubGalleryApp: App {
     @AppStorage("app.lastScreen") private var lastScreenRaw = AppStartScreen.library.rawValue
     @AppStorage("defaults.cameraDestination") private var defaultCameraDestination = StorageDestination.camera.token
     @AppStorage("camera.destinationAlbumID") private var currentCameraDestination = StorageDestination.camera.token
+    @AppStorage("onboarding.completed") private var onboardingCompleted = false
 
     private let dataStore = DataStoreBootstrap.make()
 
@@ -109,10 +146,21 @@ struct SubGalleryApp: App {
             ZStack {
                 if let errorMessage = dataStore.errorMessage {
                     DataStoreErrorView(message: errorMessage)
+                } else if StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "camera" {
+                    CameraView { destination in
+                        requestedLibraryDestination = destination
+                    }
+                } else if StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "batch" {
+                    NavigationStack {
+                        AlbumView(destination: .smart(.all), isCameraPresented: $isCameraPresented)
+                    }
+                } else if StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "albums" {
+                    StoreAlbumScreenshotHost(isCameraPresented: $isCameraPresented)
                 } else {
                     LibraryView(
                         isCameraPresented: $isCameraPresented,
-                        requestedDestination: $requestedLibraryDestination
+                        requestedDestination: $requestedLibraryDestination,
+                        requestedOnboardingAction: $requestedOnboardingAction
                     )
                         .blur(radius: obscuresContent ? 28 : 0)
                         .allowsHitTesting(!obscuresContent)
@@ -121,8 +169,19 @@ struct SubGalleryApp: App {
                 if pinLock && !isUnlocked {
                     PINLockView(unlock: unlock)
                 }
+
+                if StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "security" {
+                    PINLockView { _ in false }
+                }
             }
             .environment(\.locale, (AppLanguage(rawValue: appLanguageRaw) ?? .system).locale)
+            .environment(\.layoutDirection, (AppLanguage(rawValue: appLanguageRaw) ?? .system).resolvedIdentifier == "ar" ? .rightToLeft : .leftToRight)
+            .fullScreenCover(isPresented: $showsOnboarding, onDismiss: performOnboardingAction) {
+                OnboardingView(canDismiss: onboardingCompleted) { action in
+                    requestTrackingAuthorization(after: action)
+                }
+                .environment(\.locale, (AppLanguage(rawValue: appLanguageRaw) ?? .system).locale)
+            }
             .fullScreenCover(isPresented: $isCameraPresented) {
                 CameraView { destination in
                     requestedLibraryDestination = destination
@@ -157,7 +216,17 @@ struct SubGalleryApp: App {
                 UserDefaults.standard.set(rawID, forKey: "navigation.pendingMediaID")
                 openPendingReminderIfNeeded()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .replayOnboarding)) { _ in
+                showsOnboarding = true
+            }
             .task {
+                if StoreScreenshotMode.isEnabled {
+                    isUnlocked = true
+                    CapturePresetService.seedBuiltIns(in: dataStore.container.mainContext)
+                    await prepareStoreScreenshotFixture()
+                    applyStoreScreenshotRoute()
+                    return
+                }
                 #if DEBUG
                 await prepareUITestFixtureIfNeeded()
                 if ProcessInfo.processInfo.arguments.contains("-cloudkit-diagnostic") {
@@ -224,11 +293,183 @@ struct SubGalleryApp: App {
 
     private func applyInitialStartScreenIfNeeded() {
         guard !didApplyInitialStartScreen else { return }
+        guard onboardingCompleted || StoreScreenshotMode.isEnabled else { return }
         didApplyInitialStartScreen = true
         let start = AppStartScreen(rawValue: startScreenRaw) ?? .library
         let opensCamera = start == .camera || (start == .last && lastScreenRaw == AppStartScreen.camera.rawValue)
         if opensCamera { currentCameraDestination = defaultCameraDestination }
         isCameraPresented = opensCamera
+    }
+
+    private func performOnboardingAction() {
+        guard let action = requestedOnboardingAction else { return }
+        didApplyInitialStartScreen = true
+        switch action {
+        case .camera:
+            currentCameraDestination = defaultCameraDestination
+            isCameraPresented = true
+            requestedOnboardingAction = nil
+        case .importPhotos:
+            break
+        case .library:
+            requestedOnboardingAction = nil
+        }
+    }
+
+    private func requestTrackingAuthorization(after action: OnboardingAction) {
+        guard !isRequestingTrackingAuthorization else { return }
+        requestedOnboardingAction = action
+
+        guard ATTrackingManager.trackingAuthorizationStatus == .notDetermined else {
+            finishOnboardingAfterTrackingRequest()
+            return
+        }
+
+        isRequestingTrackingAuthorization = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            ATTrackingManager.requestTrackingAuthorization { _ in
+                DispatchQueue.main.async {
+                    finishOnboardingAfterTrackingRequest()
+                }
+            }
+        }
+    }
+
+    private func finishOnboardingAfterTrackingRequest() {
+        isRequestingTrackingAuthorization = false
+        onboardingCompleted = true
+        showsOnboarding = false
+    }
+
+    @MainActor
+    private func applyStoreScreenshotRoute() {
+        switch StoreScreenshotMode.screen {
+        case "camera":
+            isCameraPresented = true
+        case "albums":
+            let albums = (try? dataStore.container.mainContext.fetch(FetchDescriptor<Album>())) ?? []
+            if let travel = albums.first(where: { $0.purpose == .travel }) {
+                requestedLibraryDestination = .user(travel.id, travel.displayName)
+            }
+        case "batch":
+            requestedLibraryDestination = .smart(.all)
+        case "retention":
+            requestedLibraryDestination = .smart(.temporary)
+        default:
+            break
+        }
+    }
+
+    @MainActor
+    private func prepareStoreScreenshotFixture() async {
+        let context = dataStore.container.mainContext
+        let albums = (try? context.fetch(FetchDescriptor<Album>())) ?? []
+        let calendar = Calendar(identifier: .gregorian)
+        let baseDate = calendar.date(from: DateComponents(year: 2026, month: 8, day: 20, hour: 10)) ?? .now
+        let names = localizedStoreFixtureNames()
+        let fixtures: [(String, UIColor, UIColor, CapturePurpose, MediaSource, RetentionPolicy, Bool)] = [
+            (names[0], .systemTeal, .systemBlue, .travel, .camera, .forever, false),
+            (names[1], .systemGreen, .systemTeal, .travel, .camera, .forever, false),
+            (names[2], .systemOrange, .systemPink, .travel, .camera, .forever, false),
+            (names[3], .systemBrown, .systemOrange, .receipt, .camera, .thirtyDays, false),
+            (names[4], .systemIndigo, .systemBlue, .parking, .camera, .untilComplete, true),
+            (names[5], .systemPurple, .systemIndigo, .document, .files, .untilComplete, false),
+            (names[6], .systemGray, .systemPurple, .document, .photos, .today, false),
+            (names[7], .systemMint, .systemGreen, .travel, .camera, .forever, false),
+            (names[8], .systemPink, .systemPurple, .document, .photos, .sevenDays, false)
+        ]
+
+        for (index, fixture) in fixtures.enumerated() {
+            let image = storeFixtureImage(title: fixture.0, primary: fixture.1, secondary: fixture.2, index: index)
+            guard let data = image.jpegData(compressionQuality: 0.94),
+                  let stored = try? await MediaStorage.shared.store(
+                    data: data,
+                    type: .jpeg,
+                    preferredName: "__StoreShot_\(index + 1).jpg"
+                  ) else { continue }
+            let album = albums.first { $0.purpose == fixture.3 }
+            let item = MediaItem(
+                kind: .photo,
+                source: fixture.4,
+                localPath: stored.relativePath,
+                thumbnailPath: stored.thumbnailRelativePath,
+                fileName: "\(fixture.0).jpg",
+                createdAt: calendar.date(byAdding: .hour, value: index * 7, to: baseDate) ?? baseDate,
+                albumID: album?.id,
+                fileSize: stored.fileSize,
+                width: stored.width,
+                height: stored.height
+            )
+            item.purpose = fixture.3
+            item.isPinned = fixture.6
+            RetentionService.apply(fixture.5, to: item)
+            item.ocrStatus = .completed
+            item.recognizedText = fixture.0
+            context.insert(item)
+            if album?.coverMediaID == nil { album?.coverMediaID = item.id }
+        }
+        try? context.save()
+    }
+
+    private func localizedStoreFixtureNames() -> [String] {
+        switch AppLanguage.selected.resolvedIdentifier {
+        case "de":
+            ["Berlin Reise", "Berlin Mitte", "Berlin Abend", "Café-Beleg", "Parkplatz B3", "Konferenzinfo", "Büronotiz", "Wochenendspaziergang", "Konzertinfo"]
+        case "es":
+            ["Viaje a Madrid", "Madrid Centro", "Atardecer en Madrid", "Recibo de cafetería", "Aparcamiento B3", "Guía de conferencia", "Nota de oficina", "Paseo del fin de semana", "Entrada de concierto"]
+        case "fr":
+            ["Voyage à Paris", "Paris Centre", "Soirée à Paris", "Reçu du café", "Parking B3", "Guide de conférence", "Note de bureau", "Promenade du week-end", "Billet de concert"]
+        case "ja":
+            ["東京旅行", "東京駅", "東京の夕景", "カフェのレシート", "駐車場 B3", "会議案内", "仕事メモ", "週末の散歩", "コンサート案内"]
+        case "zh-Hans":
+            ["上海旅行", "上海市中心", "上海夜景", "咖啡店收据", "停车位 B3", "会议指南", "工作备忘", "周末散步", "演出门票"]
+        case "zh-Hant":
+            ["台北旅行", "台北車站", "台北夜景", "咖啡店收據", "停車位 B3", "會議指南", "工作備忘", "週末散步", "演唱會門票"]
+        case "ar":
+            ["رحلة دبي", "وسط دبي", "مساء دبي", "إيصال المقهى", "موقف B3", "دليل المؤتمر", "ملاحظة العمل", "نزهة نهاية الأسبوع", "تذكرة الحفل"]
+        case "ko":
+            ["제주 바다", "제주 한라산", "제주 노을", "카페 영수증", "주차 위치", "회의 안내", "업무 메모", "주말 산책", "공연 안내"]
+        default:
+            ["Seattle Trip", "Downtown Seattle", "Seattle Sunset", "Coffee Receipt", "Parking B3", "Conference Guide", "Office Note", "Weekend Walk", "Concert Ticket"]
+        }
+    }
+
+    private func storeFixtureImage(
+        title: String,
+        primary: UIColor,
+        secondary: UIColor,
+        index: Int
+    ) -> UIImage {
+        let size = CGSize(width: 1200, height: 1500)
+        return UIGraphicsImageRenderer(size: size).image { renderer in
+            let context = renderer.cgContext
+            let colors = [primary.cgColor, secondary.cgColor] as CFArray
+            let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1])!
+            context.drawLinearGradient(
+                gradient,
+                start: CGPoint(x: 0, y: 0),
+                end: CGPoint(x: size.width, y: size.height),
+                options: []
+            )
+            UIColor.white.withAlphaComponent(0.16).setFill()
+            for offset in 0..<5 {
+                let diameter = CGFloat(360 + offset * 90)
+                let x = CGFloat((index * 137 + offset * 211) % 900) - 140
+                let y = CGFloat((index * 251 + offset * 173) % 1200) - 120
+                context.fillEllipse(in: CGRect(x: x, y: y, width: diameter, height: diameter))
+            }
+            let symbolNames = ["airplane", "mountain.2.fill", "sun.horizon.fill", "receipt.fill", "car.fill", "doc.text.fill"]
+            let symbol = UIImage(systemName: symbolNames[index % symbolNames.count])?
+                .withTintColor(.white.withAlphaComponent(0.9), renderingMode: .alwaysOriginal)
+            symbol?.draw(in: CGRect(x: 430, y: 470, width: 340, height: 340))
+            NSString(string: title).draw(
+                in: CGRect(x: 90, y: 1250, width: 1020, height: 150),
+                withAttributes: [
+                    .font: UIFont.systemFont(ofSize: 78, weight: .bold),
+                    .foregroundColor: UIColor.white
+                ]
+            )
+        }
     }
 
     @MainActor
@@ -370,6 +611,24 @@ struct SubGalleryApp: App {
     #endif
 }
 
+private struct StoreAlbumScreenshotHost: View {
+    @Query(sort: \Album.sortOrder) private var albums: [Album]
+    @Binding var isCameraPresented: Bool
+
+    var body: some View {
+        if let travel = albums.first(where: { $0.purpose == .travel }) {
+            NavigationStack {
+                AlbumView(
+                    destination: .user(travel.id, travel.displayName),
+                    isCameraPresented: $isCameraPresented
+                )
+            }
+        } else {
+            ProgressView()
+        }
+    }
+}
+
 private struct MediaDeepLink: Identifiable {
     let id: UUID
 }
@@ -404,6 +663,11 @@ struct DataStoreBootstrap {
 
     static func make() -> DataStoreBootstrap {
         let schema = Schema([MediaItem.self, Album.self, CapturePreset.self])
+        if StoreScreenshotMode.isEnabled {
+            let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
+            let container = try! ModelContainer(for: schema, configurations: [configuration])
+            return DataStoreBootstrap(container: container, errorMessage: nil, usesCloudKit: false)
+        }
         let cloudRequested = UserDefaults.standard.bool(forKey: "icloud.sync")
         do {
             let applicationSupport = FileManager.default.urls(

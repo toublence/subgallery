@@ -3,3 +3,4 @@
 "NSLocationWhenInUseUsageDescription" = "사진에 위치 저장을 선택한 경우에만 위치를 사용합니다.";
 "NSPhotoLibraryUsageDescription" = "선택한 사진을 SubGallery로 가져오기 위해 사진 접근을 사용합니다.";
 "NSPhotoLibraryAddUsageDescription" = "선택한 항목을 사진 앱으로 내보내기 위해 사진 접근을 사용합니다.";
+"NSUserTrackingUsageDescription" = "광고 성과를 측정하고 더 관련성 높은 광고를 제공하기 위해 기기 식별자 사용을 요청합니다.";

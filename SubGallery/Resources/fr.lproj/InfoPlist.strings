@@ -3,3 +3,4 @@
 "NSLocationWhenInUseUsageDescription" = "La position est utilisée uniquement si vous choisissez de l’enregistrer avec les photos.";
 "NSPhotoLibraryUsageDescription" = "L’accès aux photos permet d’importer les photos sélectionnées.";
 "NSPhotoLibraryAddUsageDescription" = "L’accès aux photos permet d’exporter les éléments sélectionnés.";
+"NSUserTrackingUsageDescription" = "Autorisez les identifiants de l’appareil pour mesurer les performances publicitaires et proposer des publicités plus pertinentes.";

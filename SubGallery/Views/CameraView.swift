@@ -17,6 +17,8 @@ struct CameraView: View {
     @State private var lastCapture: MediaItem?
     @State private var zoomStart: CGFloat = 1
     @State private var loadedDefaults = false
+    @State private var showsAlbumCoachMark = false
+    @State private var showsRetentionCoachMark = false
     @AppStorage("storage.defaultRetention") private var defaultRetentionRaw = RetentionPolicy.forever.rawValue
     @AppStorage("storage.defaultRetentionDate") private var defaultRetentionDate = 0.0
     @AppStorage("camera.lastMode") private var lastMode = MediaKind.photo.rawValue
@@ -27,6 +29,8 @@ struct CameraView: View {
     @AppStorage("camera.destinationAlbumID") private var destinationAlbumID = ""
     @AppStorage("camera.saveLocation") private var savesLocation = false
     @AppStorage("camera.purposePresetID") private var purposePresetID = "general"
+    @AppStorage("education.cameraAlbumCoachMarkSeen") private var albumCoachMarkSeen = false
+    @AppStorage("education.retentionCoachMarkSeen") private var retentionCoachMarkSeen = false
 
     private var destination: StorageDestination {
         StorageDestination(token: destinationAlbumID)
@@ -133,6 +137,7 @@ struct CameraView: View {
         }
         camera.onPhoto = storePhoto
         camera.onVideo = storeVideo
+        if StoreScreenshotMode.isEnabled { return }
         if shouldSaveLocation { locationProvider.requestCurrentLocation() }
         camera.requestAndStart()
     }
@@ -144,7 +149,14 @@ struct CameraView: View {
 
     private var preview: some View {
         GeometryReader { proxy in
-            CameraPreview(session: camera.session, onFocus: camera.focus)
+            Group {
+                if StoreScreenshotMode.isEnabled, let item = media.first {
+                    MediaThumbnail(item: item)
+                        .scaledToFill()
+                } else {
+                    CameraPreview(session: camera.session, onFocus: camera.focus)
+                }
+            }
                 .frame(width: proxy.size.width, height: previewHeight(in: proxy.size))
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .frame(maxHeight: .infinity)
@@ -173,12 +185,7 @@ struct CameraView: View {
                 } else {
                     videoFormatMenu
                 }
-                Menu {
-                    ForEach(RetentionPolicy.allCases.filter { $0 != .customDate }) { policy in
-                        Button(policy.title) { retention = policy }
-                    }
-                } label: { Image(systemName: retention == .forever ? "infinity" : "clock") }
-                .disabled(camera.isRecording)
+                retentionMenu
                 if camera.supportsFlash {
                     Button { camera.flashMode = camera.flashMode == .off ? .on : .off } label: {
                         Image(systemName: camera.flashMode == .off ? "bolt.slash.fill" : "bolt.fill")
@@ -265,7 +272,7 @@ struct CameraView: View {
                 }
             }
             Divider()
-            Menu("저장 위치") {
+            Menu(L10n.text("저장 위치")) {
                 Button {
                     selectDestination(.camera)
                 } label: {
@@ -289,6 +296,59 @@ struct CameraView: View {
                 .font(.caption.weight(.semibold))
                 .lineLimit(1)
         }
+        .popover(isPresented: albumCoachMarkBinding, arrowEdge: .top) {
+            CameraCoachMark(
+                symbol: "rectangle.stack.fill",
+                text: L10n.text("여기서 저장할 앨범을 바꿀 수 있어요."),
+                dismiss: {
+                    albumCoachMarkSeen = true
+                    showsAlbumCoachMark = false
+                }
+            )
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    private var retentionMenu: some View {
+        Menu {
+            ForEach(RetentionPolicy.allCases.filter { $0 != .customDate }) { policy in
+                Button(policy.title) { retention = policy }
+            }
+        } label: {
+            Image(systemName: retention == .forever ? "infinity" : "clock")
+        }
+        .disabled(camera.isRecording)
+        .popover(isPresented: retentionCoachMarkBinding, arrowEdge: .top) {
+            CameraCoachMark(
+                symbol: "clock.badge.checkmark",
+                text: L10n.text("앨범마다 보관 기간을 다르게 설정할 수 있어요."),
+                dismiss: {
+                    retentionCoachMarkSeen = true
+                    showsRetentionCoachMark = false
+                }
+            )
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    private var albumCoachMarkBinding: Binding<Bool> {
+        Binding(
+            get: { showsAlbumCoachMark },
+            set: {
+                showsAlbumCoachMark = $0
+                if !$0 { albumCoachMarkSeen = true }
+            }
+        )
+    }
+
+    private var retentionCoachMarkBinding: Binding<Bool> {
+        Binding(
+            get: { showsRetentionCoachMark },
+            set: {
+                showsRetentionCoachMark = $0
+                if !$0 { retentionCoachMarkSeen = true }
+            }
+        )
     }
 
     private func purposeSymbol(_ purpose: CapturePurpose) -> String {
@@ -471,6 +531,9 @@ struct CameraView: View {
         OCRService.enqueue(item, in: modelContext)
         lastCapture = item
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if !albumCoachMarkSeen {
+            showsAlbumCoachMark = true
+        }
     }
 
     private func applyDestinationRetention() {
@@ -506,6 +569,11 @@ struct CameraView: View {
         destinationAlbumID = destination.token
         applyDestinationRetention()
         if destinationAlbum?.savesLocation == true { locationProvider.requestCurrentLocation() }
+        if albumCoachMarkSeen && !retentionCoachMarkSeen {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                showsRetentionCoachMark = true
+            }
+        }
     }
 
     private func applyPurposeRules() {
@@ -539,6 +607,26 @@ struct CameraView: View {
                 applyDestinationRetention()
             }
         }
+    }
+}
+
+private struct CameraCoachMark: View {
+    let symbol: String
+    let text: String
+    let dismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(text, systemImage: symbol)
+                .font(.subheadline.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+            Button(L10n.text("확인"), action: dismiss)
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .foregroundStyle(.primary)
+        .padding()
+        .frame(width: 270)
     }
 }
 

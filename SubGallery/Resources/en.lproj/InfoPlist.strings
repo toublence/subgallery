@@ -3,3 +3,4 @@
 "NSLocationWhenInUseUsageDescription" = "Location access is used only when you choose to save location with photos.";
 "NSPhotoLibraryUsageDescription" = "Photo access is used to import selected photos into SubGallery.";
 "NSPhotoLibraryAddUsageDescription" = "Photo access is used to export selected items to Photos.";
+"NSUserTrackingUsageDescription" = "Allow device identifiers to measure ad performance and provide more relevant ads.";

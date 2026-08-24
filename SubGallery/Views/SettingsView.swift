@@ -23,10 +23,12 @@ struct SettingsView: View {
     @AppStorage("defaults.importDestination") private var defaultImportDestination = StorageDestination.all.token
     @AppStorage("defaults.shareDestination") private var defaultShareDestination = StorageDestination.temporary.token
     @AppStorage("camera.destinationAlbumID") private var currentCameraDestination = StorageDestination.camera.token
+    @StateObject private var purchases = PurchaseManager.shared
     @StateObject private var locationPermission = LocationPermissionController()
     @State private var showsLocationSettingsAlert = false
     @State private var showsPINSetup = false
     @State private var showsPINVerification = false
+    @State private var showsPremium = false
     @State private var iCloudError: String?
 
     private let retentionOptions: [RetentionPolicy] = [
@@ -75,7 +77,7 @@ struct SettingsView: View {
                         Button(L10n.text("PIN 변경")) { showsPINSetup = true }
                     }
                     Toggle(L10n.text("앱 전환기에서 가리기"), isOn: $appSwitcherProtection)
-                    Toggle(L10n.text("내보낼 때 메타데이터 제거"), isOn: $stripsMetadata)
+                    Toggle(L10n.text("내보낼 때 메타데이터 제거"), isOn: metadataRemovalToggle)
                 } header: {
                     Text(L10n.text("개인정보 보호"))
                 } footer: {
@@ -104,7 +106,18 @@ struct SettingsView: View {
                         }
                     }
                     Toggle(L10n.text("위치 정보 저장"), isOn: locationToggle)
-                    NavigationLink(L10n.text("촬영 프리셋")) { CapturePresetListView() }
+                    if purchases.isPremium {
+                        NavigationLink(L10n.text("촬영 프리셋")) { CapturePresetListView() }
+                    } else {
+                        Button { showsPremium = true } label: {
+                            HStack {
+                                Text(L10n.text("촬영 프리셋"))
+                                Spacer()
+                                Image(systemName: "lock.fill").foregroundStyle(.secondary)
+                            }
+                        }
+                        .foregroundStyle(.primary)
+                    }
                 }
 
                 Section(L10n.text("언어")) {
@@ -116,13 +129,18 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    NavigationLink(L10n.text("사용 방법")) { UsageGuideView() }
+                    Button(L10n.text("사용 방법 다시 보기")) {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            NotificationCenter.default.post(name: .replayOnboarding, object: nil)
+                        }
+                    }
                     Link(destination: URL(string: "https://apps.apple.com/app/id6804523282?action=write-review")!) {
                         Label(L10n.text("응원하기"), systemImage: "heart.fill")
                     }
                     Button(L10n.text("앱 평가하기")) { requestReview() }
                     Link(L10n.text("문의하기"), destination: URL(string: "mailto:support@namslab.com")!)
-                    Link(L10n.text("개인정보 처리방침"), destination: URL(string: "https://namslab.com/privacy")!)
+                    Link(L10n.text("개인정보 처리방침"), destination: URL(string: "https://motionfit.fit/subgallery/privacy/")!)
                     Link(L10n.text("서비스 약관"), destination: URL(string: "https://namslab.com/terms")!)
                 } header: {
                     Text(L10n.text("지원"))
@@ -153,6 +171,7 @@ struct SettingsView: View {
                 validateDefaultDestinations()
                 refreshICloudAccountStatus()
             }
+            .task { await purchases.prepare() }
             .sheet(isPresented: $showsPINSetup) {
                 PINSetupView { saved in
                     if saved { pinLock = true }
@@ -165,6 +184,9 @@ struct SettingsView: View {
                         pinLock = false
                     }
                 }
+            }
+            .sheet(isPresented: $showsPremium) {
+                PremiumView().presentationDetents([.large])
             }
             .alert(L10n.text("iCloud를 사용할 수 없음"), isPresented: Binding(
                 get: { iCloudError != nil },
@@ -189,10 +211,27 @@ struct SettingsView: View {
             get: { pinLock },
             set: { enabled in
                 if enabled {
+                    guard purchases.isPremium else {
+                        showsPremium = true
+                        return
+                    }
                     showsPINSetup = true
                 } else {
                     showsPINVerification = true
                 }
+            }
+        )
+    }
+
+    private var metadataRemovalToggle: Binding<Bool> {
+        Binding(
+            get: { stripsMetadata },
+            set: { enabled in
+                guard !enabled || purchases.isPremium else {
+                    showsPremium = true
+                    return
+                }
+                stripsMetadata = enabled
             }
         )
     }
@@ -258,6 +297,10 @@ struct SettingsView: View {
             get: { iCloudSync },
             set: { enabled in
                 if enabled {
+                    guard purchases.isPremium else {
+                        showsPremium = true
+                        return
+                    }
                     enableICloudSync()
                 } else {
                     iCloudSync = false

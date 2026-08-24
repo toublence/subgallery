@@ -1,4 +1,8 @@
 name: SubGallery
+packages:
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk.git
+    exactVersion: 12.14.0
 options:
   bundleIdPrefix: com.namslab
   deploymentTarget:
@@ -11,12 +15,35 @@ settings:
     CURRENT_PROJECT_VERSION: 1
     MARKETING_VERSION: 1.0
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+schemes:
+  SubGallery:
+    build:
+      targets:
+        SubGallery: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - SubGalleryTests
+        - SubGalleryUITests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
 targets:
   SubGallery:
     type: application
     platform: iOS
     sources:
       - path: SubGallery
+      - path: GoogleService-Info.plist
+        buildPhase: resources
+    dependencies:
+      - package: Firebase
+        product: FirebaseAnalytics
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.namslab.subgallery
@@ -42,6 +69,7 @@ targets:
         NSCameraUsageDescription: 사진과 동영상을 SubGallery에 촬영하기 위해 카메라를 사용합니다.
         NSMicrophoneUsageDescription: 동영상에 소리를 녹음할 때 마이크를 사용합니다.
         NSLocationWhenInUseUsageDescription: 사용자가 켠 경우 촬영 위치를 사진 정보에 기록합니다.
+        NSUserTrackingUsageDescription: 광고 성과를 측정하고 더 관련성 높은 광고를 제공하기 위해 기기 식별자 사용을 요청합니다.
         UIApplicationSupportsIndirectInputEvents: true
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:

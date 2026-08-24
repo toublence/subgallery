@@ -70,23 +70,11 @@ struct MediaViewer: View {
                             Spacer()
                             Button(role: .destructive) { showsDelete = true } label: { Label(L10n.text("영구 삭제"), systemImage: "trash") }
                         } else {
-                            if current.waitingForCompletion {
-                                Button { completeCurrent() } label: {
-                                    Label(L10n.text("완료"), systemImage: "checkmark.circle.fill")
-                                }
-                                .buttonStyle(.borderedProminent)
-                            }
+                            representativeActionButton(for: current)
                             Spacer()
                             actionsMenu(for: current)
                         }
                     }
-                }
-            }
-            .overlay(alignment: .bottom) {
-                if let current, !isRecentlyDeleted {
-                    representativeActionButton(for: current)
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 62)
                 }
             }
         }
@@ -128,6 +116,12 @@ struct MediaViewer: View {
     @ViewBuilder
     private func actionsMenu(for item: MediaItem) -> some View {
         Menu {
+            if item.waitingForCompletion {
+                Button { completeCurrent() } label: {
+                    Label(L10n.text("완료"), systemImage: "checkmark.circle.fill")
+                }
+                Divider()
+            }
             contentActions(for: item)
             Divider()
             Button { showsEditor = true } label: { Label(L10n.text("편집"), systemImage: "slider.horizontal.3") }
@@ -255,15 +249,7 @@ struct MediaViewer: View {
         let action = representativeAction(for: item)
         Button { perform(action, for: item) } label: {
             Label(representativeTitle(action), systemImage: representativeSymbol(action))
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 13)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(.white)
-        .foregroundStyle(.black)
-        .clipShape(Capsule())
-        .shadow(color: .black.opacity(0.22), radius: 14, y: 5)
     }
 
     private func representativeAction(for item: MediaItem) -> RepresentativeMediaAction {

@@ -43,6 +43,7 @@ struct LibraryView: View {
     @Query(sort: \MediaItem.createdAt, order: .reverse) private var media: [MediaItem]
     @Binding var isCameraPresented: Bool
     @Binding var requestedDestination: AlbumDestination?
+    @Binding var requestedOnboardingAction: OnboardingAction?
     @AppStorage("storage.defaultRetention") private var defaultRetentionRaw = RetentionPolicy.forever.rawValue
     @AppStorage("storage.defaultRetentionDate") private var defaultRetentionDate = 0.0
     @AppStorage("camera.destinationAlbumID") private var cameraDestinationAlbumID = ""
@@ -61,10 +62,11 @@ struct LibraryView: View {
     @State private var albumPhotosSelection: [PhotosPickerItem] = []
     @State private var albumForPhotoImport: Album?
     @State private var showsAlbumPhotoPicker = false
+    @State private var showsOnboardingPhotoPicker = false
     @State private var showsSettings = false
     @State private var showsPremium = false
     @State private var importError: String?
-    @State private var searchText = ""
+    @State private var searchText = StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "search" ? StoreScreenshotMode.searchQuery : ""
     @State private var viewerItem: MediaItem?
     @State private var renamingAlbum: Album?
     @State private var renameAlbumText = ""
@@ -72,7 +74,14 @@ struct LibraryView: View {
     @State private var retentionAlbum: Album?
     @State private var rulesAlbum: Album?
     @State private var albumPendingDeletion: Album?
-    @State private var navigationPath: [AlbumDestination] = []
+    @State private var navigationPath: [AlbumDestination] = {
+        guard StoreScreenshotMode.isEnabled else { return [] }
+        switch StoreScreenshotMode.screen {
+        case "retention": return [.smart(.temporary)]
+        case "batch": return [.smart(.all)]
+        default: return []
+        }
+    }()
     @State private var restoredLastDestination = false
 
     private var columns: [GridItem] {
@@ -176,6 +185,11 @@ struct LibraryView: View {
                 navigationPath = [destination]
                 requestedDestination = nil
             }
+            .onChange(of: requestedOnboardingAction) { _, action in
+                guard action == .importPhotos else { return }
+                showsOnboardingPhotoPicker = true
+                requestedOnboardingAction = nil
+            }
             .onChange(of: navigationPath) { _, path in
                 guard restoredLastDestination else { return }
                 lastScreenRaw = AppStartScreen.library.rawValue
@@ -225,6 +239,12 @@ struct LibraryView: View {
         .photosPicker(
             isPresented: $showsAlbumPhotoPicker,
             selection: $albumPhotosSelection,
+            maxSelectionCount: 0,
+            matching: .any(of: [.images, .videos])
+        )
+        .photosPicker(
+            isPresented: $showsOnboardingPhotoPicker,
+            selection: $photosSelection,
             maxSelectionCount: 0,
             matching: .any(of: [.images, .videos])
         )

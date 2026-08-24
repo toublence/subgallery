@@ -3,3 +3,4 @@
 "NSLocationWhenInUseUsageDescription" = "只在你選擇為照片儲存位置時使用位置資訊。";
 "NSPhotoLibraryUsageDescription" = "照片權限用於輸入所選照片。";
 "NSPhotoLibraryAddUsageDescription" = "照片權限用於將所選項目輸出到照片App。";
+"NSUserTrackingUsageDescription" = "允許使用裝置識別碼來衡量廣告成效並提供更相關的廣告。";

@@ -1,0 +1,9 @@
+{
+  "01-separate": ["Fotos separat und\nsicher aufbewahren", "Wichtige Fotos und Videos bleiben gesammelt in SubGallery."],
+  "02-camera": ["Direkt ins passende\nAlbum fotografieren", "Zweck und Speicherort direkt in der Kamera wählen."],
+  "03-retention": ["Nur so lange\nwie nötig behalten", "Heute, 7 Tage, 30 Tage oder bis zur Erledigung.\nDanach räumt SubGallery automatisch auf."],
+  "04-albums": ["Nach Zweck sortiert.\nAlles übersichtlich.", "Belege, Parken, Dokumente und Reisen bleiben getrennt."],
+  "05-search": ["Text in Fotos\ndirekt durchsuchen", "Belege, Dokumente und Parkplätze\nmit einem Stichwort finden."],
+  "06-batch": ["Viele Fotos\nauf einmal ordnen", "Alle auswählen, verschieben, exportieren oder löschen."],
+  "07-private": ["Nur für dich\nzugänglich", "Schütze SubGallery mit einer PIN.\nFotos bleiben auch im App-Umschalter verborgen."]
+}

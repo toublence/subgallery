@@ -3,3 +3,4 @@
 "NSLocationWhenInUseUsageDescription" = "يُستخدم الموقع فقط عند اختيار حفظه مع الصور.";
 "NSPhotoLibraryUsageDescription" = "يُستخدم الوصول إلى الصور لاستيراد الصور المحددة.";
 "NSPhotoLibraryAddUsageDescription" = "يُستخدم الوصول إلى الصور لتصدير العناصر المحددة.";
+"NSUserTrackingUsageDescription" = "اسمح باستخدام معرّفات الجهاز لقياس أداء الإعلانات وتقديم إعلانات أكثر ملاءمة.";
