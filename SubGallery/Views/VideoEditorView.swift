@@ -51,7 +51,7 @@ struct VideoEditorView: View {
 
                 VStack(alignment: .leading, spacing: 16) {
                     HStack {
-                        Label("구간 자르기", systemImage: "timeline.selection")
+                        Label(L10n.text("구간 자르기"), systemImage: "timeline.selection")
                             .font(.headline)
                         Spacer()
                         Text("\(timeText(trimStart)) – \(timeText(trimEnd))")
@@ -61,7 +61,7 @@ struct VideoEditorView: View {
 
                     VStack(spacing: 8) {
                         HStack {
-                            Text("시작")
+                            Text(L10n.text("시작"))
                             Slider(value: $trimStart, in: 0...maximumDuration, step: 0.1)
                                 .onChange(of: trimStart) { _, value in
                                     trimStart = min(value, max(0, trimEnd - 0.1))
@@ -69,7 +69,7 @@ struct VideoEditorView: View {
                                 }
                         }
                         HStack {
-                            Text("끝")
+                            Text(L10n.text("끝"))
                             Slider(value: $trimEnd, in: 0...maximumDuration, step: 0.1)
                                 .onChange(of: trimEnd) { _, value in
                                     trimEnd = max(value, min(maximumDuration, trimStart + 0.1))
@@ -79,43 +79,43 @@ struct VideoEditorView: View {
                     }
 
                     Toggle(isOn: $removesAudio) {
-                        Label("소리 제거", systemImage: removesAudio ? "speaker.slash.fill" : "speaker.wave.2")
+                        Label(L10n.text("소리 제거"), systemImage: removesAudio ? "speaker.slash.fill" : "speaker.wave.2")
                     }
 
                     Button {
                         previewSelection()
                     } label: {
-                        Label("선택 구간 미리보기", systemImage: "play.fill")
+                        Label(L10n.text("선택 구간 미리보기"), systemImage: "play.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
 
-                    Text("원본은 유지되고 편집본이 같은 앨범에 새로 저장됩니다.")
+                    Text(L10n.text("원본은 유지되고 편집본이 같은 앨범에 새로 저장됩니다."))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
                 .padding(20)
                 .background(.regularMaterial)
             }
-            .navigationTitle("동영상 편집")
+            .navigationTitle(L10n.text("동영상 편집"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("취소") { dismiss() }
+                    Button(L10n.text("취소")) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("편집본 저장") { saveCopy() }
+                    Button(L10n.text("편집본 저장")) { saveCopy() }
                         .disabled(isSaving || trimEnd - trimStart < 0.1)
                 }
             }
             .overlay { if isSaving { ProgressView("편집본 저장 중…").padding().background(.regularMaterial, in: .rect(cornerRadius: 14)) } }
         }
         .onDisappear { player.pause() }
-        .alert("편집본을 저장할 수 없음", isPresented: Binding(
+        .alert(L10n.text("편집본을 저장할 수 없음"), isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )) {
-            Button("확인", role: .cancel) { }
+            Button(L10n.text("확인"), role: .cancel) { }
         } message: {
             Text(errorMessage ?? "")
         }

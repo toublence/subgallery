@@ -34,6 +34,15 @@ enum RetentionService {
 @MainActor
 enum MediaLifecycleService {
     static func complete(_ item: MediaItem) async {
+        guard item.deletedAt == nil else { return }
+        item.completionRestorePinned = item.isPinned
+        item.completionRestoreWaiting = item.waitingForCompletion
+        item.completionRestoreExpirationTypeRaw = item.expirationTypeRaw
+        item.completionRestoreExpirationDate = item.expirationDate
+        item.completionRestoreReminderDate = item.reminderDate
+        item.completedAt = .now
+        item.isPinned = false
+        item.waitingForCompletion = false
         await moveToRecentlyDeleted(item)
     }
 
@@ -46,6 +55,22 @@ enum MediaLifecycleService {
 
     static func restore(_ item: MediaItem) {
         item.deletedAt = nil
+        guard item.completedAt != nil else { return }
+        item.isPinned = item.completionRestorePinned
+        item.waitingForCompletion = item.completionRestoreWaiting
+        item.expirationTypeRaw = item.completionRestoreExpirationTypeRaw
+        item.expirationDate = item.completionRestoreExpirationDate
+        let reminderDate = item.completionRestoreReminderDate
+        item.completedAt = nil
+        item.completionRestoreReminderDate = nil
+        if let reminderDate, reminderDate > .now {
+            Task {
+                if let identifier = try? await ReminderService.shared.schedule(for: item, at: reminderDate) {
+                    item.reminderDate = reminderDate
+                    item.reminderIdentifier = identifier
+                }
+            }
+        }
     }
 
     static func permanentlyDelete(_ item: MediaItem, from context: ModelContext) async {

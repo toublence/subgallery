@@ -109,12 +109,29 @@ enum MediaExportService {
 
 struct ActivityShareSheet: UIViewControllerRepresentable {
     let urls: [URL]
+    var onComplete: ((Bool) -> Void)? = nil
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onComplete: onComplete)
+    }
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: urls, applicationActivities: nil)
+        let controller = UIActivityViewController(activityItems: urls, applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, completed, _, _ in
+            DispatchQueue.main.async { context.coordinator.onComplete?(completed) }
+        }
+        return controller
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) { }
+
+    final class Coordinator {
+        let onComplete: ((Bool) -> Void)?
+
+        init(onComplete: ((Bool) -> Void)?) {
+            self.onComplete = onComplete
+        }
+    }
 }
 
 struct FilesExportPicker: UIViewControllerRepresentable {

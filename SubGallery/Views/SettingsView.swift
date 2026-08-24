@@ -35,46 +35,46 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("보관") {
-                    Picker("기본 보관 기간", selection: $defaultRetention) {
+                Section(L10n.text("보관")) {
+                    Picker(L10n.text("기본 보관 기간"), selection: $defaultRetention) {
                         ForEach(retentionOptions) { policy in
                             Text(policy.title).tag(policy.rawValue)
                         }
                     }
 
                     if defaultRetention == RetentionPolicy.customDate.rawValue {
-                        DatePicker("날짜", selection: customRetentionDate, in: Date.now..., displayedComponents: .date)
+                        DatePicker(L10n.text("날짜"), selection: customRetentionDate, in: Date.now..., displayedComponents: .date)
                     }
                 }
 
                 Section {
-                    Picker("카메라", selection: $defaultCameraDestination) {
-                        Text("카메라").tag(StorageDestination.camera.token)
-                        Text("임시 보관").tag(StorageDestination.temporary.token)
+                    Picker(L10n.text("카메라"), selection: $defaultCameraDestination) {
+                        Text(L10n.text("카메라")).tag(StorageDestination.camera.token)
+                        Text(L10n.text("임시 보관")).tag(StorageDestination.temporary.token)
                         destinationAlbumOptions
                     }
-                    Picker("가져오기", selection: $defaultImportDestination) {
-                        Text("전체").tag(StorageDestination.all.token)
-                        Text("임시 보관").tag(StorageDestination.temporary.token)
+                    Picker(L10n.text("가져오기"), selection: $defaultImportDestination) {
+                        Text(L10n.text("전체")).tag(StorageDestination.all.token)
+                        Text(L10n.text("임시 보관")).tag(StorageDestination.temporary.token)
                         destinationAlbumOptions
                     }
-                    Picker("공유로 가져오기", selection: $defaultShareDestination) {
-                        Text("임시 보관").tag(StorageDestination.temporary.token)
+                    Picker(L10n.text("공유로 가져오기"), selection: $defaultShareDestination) {
+                        Text(L10n.text("임시 보관")).tag(StorageDestination.temporary.token)
                         destinationAlbumOptions
                     }
                 } header: {
-                    Text("기본 앨범")
+                    Text(L10n.text("기본 앨범"))
                 } footer: {
-                    Text("사용자 앨범을 선택하면 해당 앨범의 기본 보관 기간도 자동으로 적용됩니다.")
+                    Text(L10n.text("사용자 앨범을 선택하면 해당 앨범의 기본 보관 기간도 자동으로 적용됩니다."))
                 }
 
                 Section {
                     Toggle(biometricLockTitle, isOn: biometricLockToggle)
                         .disabled(!biometricsAvailable && !biometricLock)
-                    Toggle("앱 전환기에서 가리기", isOn: $appSwitcherProtection)
-                    Toggle("내보낼 때 메타데이터 제거", isOn: $stripsMetadata)
+                    Toggle(L10n.text("앱 전환기에서 가리기"), isOn: $appSwitcherProtection)
+                    Toggle(L10n.text("내보낼 때 메타데이터 제거"), isOn: $stripsMetadata)
                 } header: {
-                    Text("개인정보 보호")
+                    Text(L10n.text("개인정보 보호"))
                 } footer: {
                     Text(biometricPrivacyDescription + " " + L10n.text("메타데이터 제거를 켜면 Photos, Files와 공유로 내보낼 때 위치·기기·촬영 정보를 제거합니다."))
                 }
@@ -82,7 +82,7 @@ struct SettingsView: View {
                 Section("iCloud") {
                     Toggle(isOn: $iCloudSync) {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("iCloud 동기화")
+                            Text(L10n.text("iCloud 동기화"))
                             Text(iCloudStatusText)
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
@@ -90,17 +90,18 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("카메라") {
-                    Picker("앱 시작 화면", selection: $appStartScreen) {
+                Section(L10n.text("카메라")) {
+                    Picker(L10n.text("앱 시작 화면"), selection: $appStartScreen) {
                         ForEach(AppStartScreen.allCases) { screen in
                             Text(screen.title).tag(screen.rawValue)
                         }
                     }
-                    Toggle("위치 정보 저장", isOn: locationToggle)
+                    Toggle(L10n.text("위치 정보 저장"), isOn: locationToggle)
+                    NavigationLink(L10n.text("촬영 프리셋")) { CapturePresetListView() }
                 }
 
-                Section("언어") {
-                    Picker("앱 언어", selection: $appLanguage) {
+                Section(L10n.text("언어")) {
+                    Picker(L10n.text("앱 언어"), selection: $appLanguage) {
                         ForEach(AppLanguage.allCases) { language in
                             Text(language.title).tag(language.rawValue)
                         }
@@ -108,27 +109,28 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    NavigationLink("사용 방법") { UsageGuideView() }
+                    NavigationLink(L10n.text("사용 방법")) { UsageGuideView() }
                     Link(destination: URL(string: "https://apps.apple.com/app/id6804523282?action=write-review")!) {
-                        Label("응원하기", systemImage: "heart.fill")
+                        Label(L10n.text("응원하기"), systemImage: "heart.fill")
                     }
-                    Button("앱 평가하기") { requestReview() }
-                    Link("문의하기", destination: URL(string: "mailto:support@namslab.com")!)
-                    Link("개인정보 처리방침", destination: URL(string: "https://namslab.com/privacy")!)
-                    Link("서비스 약관", destination: URL(string: "https://namslab.com/terms")!)
+                    Button(L10n.text("앱 평가하기")) { requestReview() }
+                    Link(L10n.text("문의하기"), destination: URL(string: "mailto:support@namslab.com")!)
+                    Link(L10n.text("개인정보 처리방침"), destination: URL(string: "https://namslab.com/privacy")!)
+                    Link(L10n.text("서비스 약관"), destination: URL(string: "https://namslab.com/terms")!)
                 } header: {
-                    Text("지원")
+                    Text(L10n.text("지원"))
                 } footer: {
                     Text("SubGallery \(appVersion)")
                         .frame(maxWidth: .infinity)
                         .padding(.top, 8)
                 }
             }
-            .navigationTitle("설정")
+            .navigationTitle(L10n.text("설정"))
+            .id(appLanguage)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("완료") { dismiss() }
+                    Button(L10n.text("완료")) { dismiss() }
                 }
             }
             .onChange(of: defaultRetention) { _, value in
@@ -144,19 +146,19 @@ struct SettingsView: View {
                 validateDefaultDestinations()
                 updateBiometricAvailability()
             }
-            .alert("위치 접근이 필요합니다.", isPresented: $showsLocationSettingsAlert) {
-                Button("취소", role: .cancel) { }
-                Button("설정 열기") {
+            .alert(L10n.text("위치 접근이 필요합니다."), isPresented: $showsLocationSettingsAlert) {
+                Button(L10n.text("취소"), role: .cancel) { }
+                Button(L10n.text("설정 열기")) {
                     guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
                     UIApplication.shared.open(url)
                 }
             }
-            .alert("Touch ID를 사용할 수 없음", isPresented: Binding(
+            .alert(L10n.text("Touch ID를 사용할 수 없음"), isPresented: Binding(
                 get: { biometricError != nil },
                 set: { if !$0 { biometricError = nil } }
             )) {
-                Button("확인", role: .cancel) { }
-                Button("설정 열기") {
+                Button(L10n.text("확인"), role: .cancel) { }
+                Button(L10n.text("설정 열기")) {
                     guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
                     UIApplication.shared.open(url)
                 }
@@ -167,14 +169,14 @@ struct SettingsView: View {
     }
 
     private var biometricLockTitle: String {
-        "Touch ID로 잠금"
+        L10n.text("Touch ID로 잠금")
     }
 
     private var biometricPrivacyDescription: String {
         if biometricsAvailable || biometricLock {
-            return "앱을 다시 열거나 다른 앱에서 돌아오면 인증 후 보관함을 표시합니다."
+            return L10n.text("앱을 다시 열거나 다른 앱에서 돌아오면 인증 후 보관함을 표시합니다.")
         }
-        return "이 기기에서 사용할 수 있는 Touch ID가 없습니다."
+        return L10n.text("이 기기에서 사용할 수 있는 Touch ID가 없습니다.")
     }
 
     private var biometricLockToggle: Binding<Bool> {
@@ -206,18 +208,18 @@ struct SettingsView: View {
         guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error),
               context.biometryType == .touchID else {
             biometricLock = false
-            biometricError = error?.localizedDescription ?? "Touch ID를 먼저 설정해 주세요."
+            biometricError = error?.localizedDescription ?? L10n.text("Touch ID를 먼저 설정해 주세요.")
             updateBiometricAvailability()
             return
         }
         context.evaluatePolicy(
             .deviceOwnerAuthenticationWithBiometrics,
-            localizedReason: "Touch ID로 SubGallery의 비공개 보관함 잠금을 켭니다."
+            localizedReason: L10n.text("Touch ID로 SubGallery의 비공개 보관함 잠금을 켭니다.")
         ) { success, error in
             DispatchQueue.main.async {
                 biometricLock = success
                 if !success {
-                    biometricError = error?.localizedDescription ?? "Touch ID 인증에 실패했습니다."
+                    biometricError = error?.localizedDescription ?? L10n.text("Touch ID 인증에 실패했습니다.")
                 }
                 updateBiometricAvailability()
             }
@@ -227,7 +229,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var destinationAlbumOptions: some View {
         ForEach(albums) { album in
-            Text(album.name).tag(StorageDestination.album(album.id).token)
+            Text(album.displayName).tag(StorageDestination.album(album.id).token)
         }
     }
 
@@ -284,6 +286,141 @@ struct SettingsView: View {
     }
 }
 
+private struct CapturePresetListView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \CapturePreset.sortOrder) private var presets: [CapturePreset]
+    @State private var editingPreset: CapturePreset?
+    @State private var createsPreset = false
+
+    var body: some View {
+        List {
+            ForEach(presets) { preset in
+                Button { editingPreset = preset } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(preset.displayName).foregroundStyle(.primary)
+                            Text(summary(preset)).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                    }
+                }
+                .swipeActions {
+                    if !preset.isBuiltIn {
+                        Button(L10n.text("삭제"), role: .destructive) {
+                            modelContext.delete(preset)
+                            try? modelContext.save()
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle(L10n.text("촬영 프리셋"))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { createsPreset = true } label: { Label(L10n.text("프리셋 추가"), systemImage: "plus") }
+            }
+        }
+        .sheet(item: $editingPreset) { preset in
+            CapturePresetEditorView(preset: preset)
+        }
+        .sheet(isPresented: $createsPreset) {
+            CapturePresetEditorView(preset: nil)
+        }
+    }
+
+    private func summary(_ preset: CapturePreset) -> String {
+        var values = [preset.retention.title]
+        if preset.ocrEnabled { values.append(L10n.text("OCR 켬")) }
+        if preset.savesLocation { values.append(L10n.text("위치 저장")) }
+        if preset.autoPins { values.append(L10n.text("자동 고정")) }
+        return values.joined(separator: " · ")
+    }
+}
+
+private struct CapturePresetEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \Album.sortOrder) private var albums: [Album]
+    let preset: CapturePreset?
+    @State private var name: String
+    @State private var albumToken: String
+    @State private var retention: RetentionPolicy
+    @State private var ocrEnabled: Bool
+    @State private var savesLocation: Bool
+    @State private var autoPins: Bool
+    @State private var primaryAction: PrimaryMediaAction
+
+    init(preset: CapturePreset?) {
+        self.preset = preset
+        _name = State(initialValue: preset?.name ?? "")
+        _albumToken = State(initialValue: preset?.albumID?.uuidString ?? "")
+        _retention = State(initialValue: preset?.retention ?? .untilComplete)
+        _ocrEnabled = State(initialValue: preset?.ocrEnabled ?? true)
+        _savesLocation = State(initialValue: preset?.savesLocation ?? false)
+        _autoPins = State(initialValue: preset?.autoPins ?? false)
+        _primaryAction = State(initialValue: preset?.primaryAction ?? .automatic)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(L10n.text("프리셋")) {
+                    TextField(L10n.text("이름"), text: $name)
+                    Picker(L10n.text("저장 앨범"), selection: $albumToken) {
+                        Text(L10n.text("기존 기본 앨범")).tag("")
+                        ForEach(albums) { album in Text(album.displayName).tag(album.id.uuidString) }
+                    }
+                    Picker(L10n.text("보관 기간"), selection: $retention) {
+                        ForEach(RetentionPolicy.allCases.filter { $0 != .customDate }) { policy in
+                            Text(policy.title).tag(policy)
+                        }
+                    }
+                    Picker(L10n.text("대표 Action"), selection: $primaryAction) {
+                        ForEach(PrimaryMediaAction.allCases) { action in Text(action.title).tag(action) }
+                    }
+                }
+                Section(L10n.text("촬영 및 분석")) {
+                    Toggle(L10n.text("텍스트·QR 분석"), isOn: $ocrEnabled)
+                    Toggle(L10n.text("촬영 위치 저장"), isOn: $savesLocation)
+                    Toggle(L10n.text("촬영 후 자동 고정"), isOn: $autoPins)
+                }
+            }
+            .navigationTitle(L10n.text(preset == nil ? "프리셋 추가" : "프리셋 수정"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(L10n.text("취소")) { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L10n.text("저장")) { save() }
+                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        let target: CapturePreset
+        if let preset {
+            target = preset
+        } else {
+            target = CapturePreset(name: name)
+            target.purpose = .custom
+            target.sortOrder = ((try? modelContext.fetch(FetchDescriptor<CapturePreset>()))?.count ?? 0)
+            modelContext.insert(target)
+        }
+        target.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        target.albumID = UUID(uuidString: albumToken)
+        target.retention = retention
+        target.ocrEnabled = ocrEnabled
+        target.savesLocation = savesLocation
+        target.autoPins = autoPins
+        target.primaryAction = primaryAction
+        try? modelContext.save()
+        dismiss()
+    }
+}
+
 private struct UsageGuideView: View {
     private let guides: [(String, String, String)] = [
         ("camera", "사진 촬영하기", "보관함 아래의 카메라를 누르고 촬영하세요. 저장 대상 앨범과 보관 기간도 카메라에서 바꿀 수 있습니다."),
@@ -300,15 +437,15 @@ private struct UsageGuideView: View {
         List(guides.indices, id: \.self) { index in
             guideRow(guides[index])
         }
-        .navigationTitle("사용 방법")
+        .navigationTitle(L10n.text("사용 방법"))
         .navigationBarTitleDisplayMode(.inline)
     }
 
     private func guideRow(_ guide: (String, String, String)) -> some View {
         Label {
             VStack(alignment: .leading, spacing: 4) {
-                Text(guide.1).font(.headline)
-                Text(guide.2).font(.subheadline).foregroundStyle(.secondary)
+                Text(L10n.text(guide.1)).font(.headline)
+                Text(L10n.text(guide.2)).font(.subheadline).foregroundStyle(.secondary)
             }
             .padding(.vertical, 4)
         } icon: {

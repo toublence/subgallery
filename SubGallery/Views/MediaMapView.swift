@@ -63,7 +63,7 @@ struct MediaMapView: View {
         }
         .background(section == .map ? Color.travelInk : Color(.systemGroupedBackground))
         .safeAreaInset(edge: .top, spacing: 0) { journeyControls }
-        .navigationTitle("\(albumName) 지도")
+        .navigationTitle(L10n.format("%@ 지도", albumName))
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(item: $viewerItem) { item in
             MediaViewer(items: locatedItems, initialID: item.id, isRecentlyDeleted: false)
@@ -111,7 +111,7 @@ struct MediaMapView: View {
                             .background(.thinMaterial, in: Circle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("전체 위치 보기")
+                    .accessibilityLabel(L10n.text("전체 위치 보기"))
                 }
             }
 
@@ -138,7 +138,7 @@ struct MediaMapView: View {
                     HStack(spacing: 8) {
                         yearButton(nil, title: "전체")
                         ForEach(availableYears, id: \.self) { year in
-                            yearButton(year, title: "\(year)년")
+                            yearButton(year, title: L10n.format("%d년", year))
                         }
                     }
                 }
@@ -182,8 +182,8 @@ struct MediaMapView: View {
     }
 
     private var mapSummary: String {
-        guard !locatedItems.isEmpty else { return "사진의 위치로 타임라인을 자동 생성합니다" }
-        return "\(clusters.count)곳 · 사진과 동영상 \(locatedItems.count)개"
+        guard !locatedItems.isEmpty else { return L10n.text("사진의 위치로 타임라인을 자동 생성합니다") }
+        return L10n.format("%d곳 · 사진과 동영상 %d개", clusters.count, locatedItems.count)
     }
 
     private var mapContent: some View {
@@ -280,11 +280,11 @@ struct MediaMapView: View {
 
     private var mapOverviewCard: some View {
         HStack(spacing: 16) {
-            Label("\(clusters.count)곳", systemImage: "mappin.and.ellipse")
+            Label(L10n.format("%d곳", clusters.count), systemImage: "mappin.and.ellipse")
             Divider().frame(height: 22).overlay(.white.opacity(0.3))
-            Label("\(locatedItems.count)개 기록", systemImage: "photo.stack")
+            Label(L10n.format("%d개 기록", locatedItems.count), systemImage: "photo.stack")
             Spacer()
-            Text("사진을 눌러보세요")
+            Text(L10n.text("사진을 눌러보세요"))
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.66))
         }
@@ -314,9 +314,9 @@ struct MediaMapView: View {
                     .font(.title2)
                     .foregroundStyle(Color.travelCoral)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(placeNames.names[cluster.placeKey] ?? "이 위치의 기록")
+                    Text(placeNames.names[cluster.placeKey] ?? L10n.text("이 위치의 기록"))
                         .font(.title3.bold())
-                    Text("\(albumName)의 여행 기록")
+                    Text(L10n.format("%@의 여행 기록", albumName))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -341,10 +341,10 @@ struct MediaMapView: View {
             }
 
             HStack {
-                Text("최근 사진")
+                Text(L10n.text("최근 사진"))
                     .font(.subheadline.bold())
                 Spacer()
-                Button("타임라인 보기") {
+                Button(L10n.text("타임라인 보기")) {
                     withAnimation(.snappy) {
                         selectedClusterID = nil
                         section = .timeline
@@ -391,7 +391,7 @@ struct MediaMapView: View {
                 .foregroundStyle(Color.travelCoral)
             Text(value)
                 .font(.subheadline.bold().monospacedDigit())
-            Text(title)
+            Text(L10n.text(title))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -425,9 +425,9 @@ struct MediaMapView: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("자동 여행 타임라인")
+                    Text(L10n.text("자동 여행 타임라인"))
                         .font(.title2.bold())
-                    Text("사진의 시간과 이동 거리로 여행을 정리했어요")
+                    Text(L10n.text("사진의 시간과 이동 거리로 여행을 정리했어요"))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -463,7 +463,7 @@ struct MediaMapView: View {
                 .foregroundStyle(Color.travelCoral)
             Text(value)
                 .font(.title3.bold().monospacedDigit())
-            Text(title)
+            Text(L10n.text(title))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -483,9 +483,9 @@ struct MediaMapView: View {
                 .frame(width: 132, height: 132)
 
                 VStack(spacing: 8) {
-                    Text("위치가 있는 사진이 없습니다")
+                    Text(L10n.text("위치가 있는 사진이 없습니다"))
                         .font(.title3.bold())
-                    Text("위치 정보가 포함된 사진을 가져오거나, 새로 촬영할 때 위치 저장을 켜면 기억 지도와 타임라인이 자동으로 만들어집니다.")
+                    Text(L10n.text("위치 정보가 포함된 사진을 가져오거나, 새로 촬영할 때 위치 저장을 켜면 기억 지도와 타임라인이 자동으로 만들어집니다."))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -495,7 +495,7 @@ struct MediaMapView: View {
                     Button {
                         savesLocation = true
                     } label: {
-                        Label("새 촬영에 위치 저장", systemImage: "location.fill")
+                        Label(L10n.text("새 촬영에 위치 저장"), systemImage: "location.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(Color.travelCoral)
@@ -528,7 +528,7 @@ private enum MapSection: String, CaseIterable, Identifiable {
     case timeline
 
     var id: String { rawValue }
-    var title: String { self == .map ? "지도" : "타임라인" }
+    var title: String { L10n.text(self == .map ? "지도" : "타임라인") }
     var symbol: String { self == .map ? "map" : "point.topleft.down.to.point.bottomright.curvepath" }
 }
 
@@ -537,7 +537,7 @@ private enum MapPresentation: String, CaseIterable, Identifiable {
     case footprints
 
     var id: String { rawValue }
-    var title: String { self == .regions ? "여행 지도" : "빛나는 발자취" }
+    var title: String { L10n.text(self == .regions ? "여행 지도" : "빛나는 발자취") }
     var symbol: String { self == .regions ? "map.fill" : "sparkles" }
 }
 
@@ -745,12 +745,12 @@ private struct TimelineStopRow: View {
                         LinearGradient(colors: [.clear, .black.opacity(0.82)], startPoint: .center, endPoint: .bottom)
 
                         VStack(alignment: .leading, spacing: 5) {
-                            Text("자동 생성")
+                            Text(L10n.text("자동 생성"))
                                 .font(.caption2.bold())
                                 .padding(.horizontal, 9)
                                 .padding(.vertical, 5)
                                 .background(Color.travelCoral, in: Capsule())
-                            Text(placeName ?? "장소 확인 중")
+                            Text(placeName ?? L10n.text("장소 확인 중"))
                                 .font(.title2.bold())
                             Text(stop.date.formatted(date: .long, time: .shortened))
                                 .font(.caption)
@@ -774,10 +774,10 @@ private struct TimelineStopRow: View {
                 .shadow(color: Color.travelInk.opacity(0.16), radius: 14, y: 7)
 
                 HStack {
-                    Label("이 장소의 기록 \(stop.items.count)개", systemImage: "mappin.circle.fill")
+                    Label(L10n.format("이 장소의 기록 %d개", stop.items.count), systemImage: "mappin.circle.fill")
                         .foregroundStyle(Color.travelCoral)
                     Spacer()
-                    Text("시간·위치로 자동 분류")
+                    Text(L10n.text("시간·위치로 자동 분류"))
                 }
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)

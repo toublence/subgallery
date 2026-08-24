@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A10E9F4D92D840CBA5010017 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10E9F4D92D840CBA5010018 /* ShareViewController.swift */; };
+		A10E9F4D92D840CBA5010020 /* SubGalleryShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A10E9F4D92D840CBA5010019 /* SubGalleryShareExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		00DED6DE466B339AAA463A1E /* ReminderFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B68C1E5FC9C4C887734FB62 /* ReminderFlowUITests.swift */; };
 		11B00E2B1EB9D0E3F884B0ED /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F33C5AE813196FAAA5B9CAC5 /* LibraryView.swift */; };
 		225D0FB1F75165A16C407B8B /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = D074F98E47DED466A20E2D5A /* Localization.swift */; };
@@ -22,6 +24,9 @@
 		A10E9F4D92D840CBA5010003 /* PhotoEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10E9F4D92D840CBA5010004 /* PhotoEditorView.swift */; };
 		A10E9F4D92D840CBA5010007 /* MediaMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10E9F4D92D840CBA5010008 /* MediaMapView.swift */; };
 		A10E9F4D92D840CBA5010009 /* VideoEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10E9F4D92D840CBA5010010 /* VideoEditorView.swift */; };
+		A10E9F4D92D840CBA5010011 /* MediaActionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10E9F4D92D840CBA5010012 /* MediaActionService.swift */; };
+		A10E9F4D92D840CBA5010013 /* CapturePresetService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10E9F4D92D840CBA5010014 /* CapturePresetService.swift */; };
+		A10E9F4D92D840CBA5010015 /* SharedInboxService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10E9F4D92D840CBA5010016 /* SharedInboxService.swift */; };
 		8BD7ACB045259CAA84FC2045 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 1D489CE3A383A1E1AEF7AB86 /* InfoPlist.strings */; };
 		91EC3F20C752640D9487B1C7 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = D78092775023047B18994069 /* Models.swift */; };
 		B5F4E4EC2909B3656C925291 /* CoreFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2EA5C4FAE6BF967F0128E57 /* CoreFeatureTests.swift */; };
@@ -32,7 +37,28 @@
 		F38CE955FEDCFAFD4C35F12C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A61D1381EDDC141B87A96112 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		A10E9F4D92D840CBA5010029 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A10E9F4D92D840CBA5010020 /* SubGalleryShareExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXContainerItemProxy section */
+		A10E9F4D92D840CBA5010031 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DFA0C9A3DBFFEA8A02CE4BD1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10E9F4D92D840CBA5010025;
+			remoteInfo = SubGalleryShareExtension;
+		};
 		21E834B2252007C7C14305A4 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = DFA0C9A3DBFFEA8A02CE4BD1 /* Project object */;
@@ -50,6 +76,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		A10E9F4D92D840CBA5010018 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		A10E9F4D92D840CBA5010019 /* SubGalleryShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SubGalleryShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10E9F4D92D840CBA5010022 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A10E9F4D92D840CBA5010023 /* SubGalleryShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SubGalleryShareExtension.entitlements; sourceTree = "<group>"; };
 		0580F6773753EDD670BE2E3E /* fr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = fr; path = fr.lproj/Localizable.strings; sourceTree = "<group>"; };
 		0B4EA127F1CE16F4388BA504 /* SubGalleryApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubGalleryApp.swift; sourceTree = "<group>"; };
 		0F39795236E7F4026FACB9E5 /* SubGallery.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SubGallery.entitlements; sourceTree = "<group>"; };
@@ -82,6 +112,9 @@
 		A10E9F4D92D840CBA5010004 /* PhotoEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEditorView.swift; sourceTree = "<group>"; };
 		A10E9F4D92D840CBA5010008 /* MediaMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaMapView.swift; sourceTree = "<group>"; };
 		A10E9F4D92D840CBA5010010 /* VideoEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoEditorView.swift; sourceTree = "<group>"; };
+		A10E9F4D92D840CBA5010012 /* MediaActionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaActionService.swift; sourceTree = "<group>"; };
+		A10E9F4D92D840CBA5010014 /* CapturePresetService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturePresetService.swift; sourceTree = "<group>"; };
+		A10E9F4D92D840CBA5010016 /* SharedInboxService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedInboxService.swift; sourceTree = "<group>"; };
 		AD0EE35CB4D7D4A57C1998F9 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		CE1D30AFD5D1C9954ED41EB0 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		D074F98E47DED466A20E2D5A /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
@@ -103,6 +136,7 @@
 				3AE0F676AB22B1CD35BC6667 /* SubGallery */,
 				4C820C592659E3ECBCF32988 /* SubGalleryTests */,
 				F0A4DD2EECCA93F4B8B70027 /* SubGalleryUITests */,
+				A10E9F4D92D840CBA5010021 /* SubGalleryShareExtension */,
 				4B6C620E09E6AF39FC9B7F43 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -125,6 +159,7 @@
 				7CBA88F341CA8A5A621EDA12 /* SubGallery.app */,
 				5189CFE3AFEAD981E774B475 /* SubGalleryTests.xctest */,
 				1452001D34CA7B8E9299D30D /* SubGalleryUITests.xctest */,
+				A10E9F4D92D840CBA5010019 /* SubGalleryShareExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -188,6 +223,9 @@
 				D074F98E47DED466A20E2D5A /* Localization.swift */,
 				D38749B796DA97D3C928B151 /* MediaStorage.swift */,
 				A10E9F4D92D840CBA5010002 /* MediaExportService.swift */,
+				A10E9F4D92D840CBA5010012 /* MediaActionService.swift */,
+				A10E9F4D92D840CBA5010014 /* CapturePresetService.swift */,
+				A10E9F4D92D840CBA5010016 /* SharedInboxService.swift */,
 				21BFAC06B4C31AEE4A0BC851 /* OCRService.swift */,
 				A5E6A5E7050A65C1316E1469 /* ReminderService.swift */,
 				E2C11E7C2B32572F1741D84C /* RetentionService.swift */,
@@ -203,6 +241,16 @@
 			path = SubGalleryUITests;
 			sourceTree = "<group>";
 		};
+		A10E9F4D92D840CBA5010021 /* SubGalleryShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				A10E9F4D92D840CBA5010018 /* ShareViewController.swift */,
+				A10E9F4D92D840CBA5010022 /* Info.plist */,
+				A10E9F4D92D840CBA5010023 /* SubGalleryShareExtension.entitlements */,
+			);
+			path = SubGalleryShareExtension;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -212,10 +260,12 @@
 			buildPhases = (
 				893911DB35124AE4FD27DC34 /* Sources */,
 				38B349D9975CE794B7EA5268 /* Resources */,
+				A10E9F4D92D840CBA5010029 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A10E9F4D92D840CBA5010030 /* PBXTargetDependency */,
 			);
 			name = SubGallery;
 			packageProductDependencies = (
@@ -223,6 +273,24 @@
 			productName = SubGallery;
 			productReference = 7CBA88F341CA8A5A621EDA12 /* SubGallery.app */;
 			productType = "com.apple.product-type.application";
+		};
+		A10E9F4D92D840CBA5010025 /* SubGalleryShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10E9F4D92D840CBA5010028 /* Build configuration list for PBXNativeTarget "SubGalleryShareExtension" */;
+			buildPhases = (
+				A10E9F4D92D840CBA5010024 /* Sources */,
+				A10E9F4D92D840CBA5010033 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SubGalleryShareExtension;
+			packageProductDependencies = (
+			);
+			productName = SubGalleryShareExtension;
+			productReference = A10E9F4D92D840CBA5010019 /* SubGalleryShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		F96E838A4C99EB7E93F3719F /* SubGalleryTests */ = {
 			isa = PBXNativeTarget;
@@ -269,6 +337,10 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					A10E9F4D92D840CBA5010025 = {
+						DevelopmentTeam = 2CZQR7Q423;
+						ProvisioningStyle = Automatic;
+					};
 					285CBCD187EA3121577D8D2C = {
 						DevelopmentTeam = 2CZQR7Q423;
 						ProvisioningStyle = Automatic;
@@ -307,6 +379,7 @@
 			projectRoot = "";
 			targets = (
 				285CBCD187EA3121577D8D2C /* SubGallery */,
+				A10E9F4D92D840CBA5010025 /* SubGalleryShareExtension */,
 				F96E838A4C99EB7E93F3719F /* SubGalleryTests */,
 				FE24529E8B463A3E5A57E085 /* SubGalleryUITests */,
 			);
@@ -314,6 +387,13 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A10E9F4D92D840CBA5010033 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		38B349D9975CE794B7EA5268 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -327,6 +407,14 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A10E9F4D92D840CBA5010024 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10E9F4D92D840CBA5010017 /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		44817845917E912BD6D1C275 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -346,6 +434,9 @@
 				225D0FB1F75165A16C407B8B /* Localization.swift in Sources */,
 				2BB7F3F653B0FB47CE7D1A94 /* MediaStorage.swift in Sources */,
 				A10E9F4D92D840CBA5010001 /* MediaExportService.swift in Sources */,
+				A10E9F4D92D840CBA5010011 /* MediaActionService.swift in Sources */,
+				A10E9F4D92D840CBA5010013 /* CapturePresetService.swift in Sources */,
+				A10E9F4D92D840CBA5010015 /* SharedInboxService.swift in Sources */,
 				543252B1147C4073FF3A130F /* MediaViewer.swift in Sources */,
 				A10E9F4D92D840CBA5010007 /* MediaMapView.swift in Sources */,
 				A10E9F4D92D840CBA5010003 /* PhotoEditorView.swift in Sources */,
@@ -371,6 +462,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		A10E9F4D92D840CBA5010030 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10E9F4D92D840CBA5010025 /* SubGalleryShareExtension */;
+			targetProxy = A10E9F4D92D840CBA5010031 /* PBXContainerItemProxy */;
+		};
 		9B6CEF7A0B39C3787318F079 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 285CBCD187EA3121577D8D2C /* SubGallery */;
@@ -419,6 +515,56 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		A10E9F4D92D840CBA5010026 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = SubGalleryShareExtension/SubGalleryShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2CZQR7Q423;
+				INFOPLIST_FILE = SubGalleryShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.namslab.subgallery.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A10E9F4D92D840CBA5010027 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = SubGalleryShareExtension/SubGalleryShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2CZQR7Q423;
+				INFOPLIST_FILE = SubGalleryShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.namslab.subgallery.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		0E6F146DFDB584A92F0BA8F0 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -655,6 +801,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A10E9F4D92D840CBA5010028 /* Build configuration list for PBXNativeTarget "SubGalleryShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10E9F4D92D840CBA5010026 /* Debug */,
+				A10E9F4D92D840CBA5010027 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		00EC09D38186475252B3587C /* Build configuration list for PBXProject "SubGallery" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

@@ -10,6 +10,7 @@ private enum EditorCrop: String, CaseIterable, Identifiable {
     case sixteenNine = "16:9"
 
     var id: String { rawValue }
+    var title: String { self == .original ? L10n.text(rawValue) : rawValue }
     var ratio: CGFloat? {
         switch self {
         case .original: nil
@@ -47,23 +48,23 @@ struct PhotoEditorView: View {
                 controls
             }
             .background(Color.black)
-            .navigationTitle("편집")
+            .navigationTitle(L10n.text("편집"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.black, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("취소") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(L10n.text("취소")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("편집본 저장") { saveCopy() }.disabled(isSaving || sourceImage == nil)
+                    Button(L10n.text("편집본 저장")) { saveCopy() }.disabled(isSaving || sourceImage == nil)
                 }
             }
         }
         .preferredColorScheme(.dark)
-        .alert("편집본을 저장할 수 없음", isPresented: Binding(
+        .alert(L10n.text("편집본을 저장할 수 없음"), isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )) {
-            Button("확인", role: .cancel) { }
+            Button(L10n.text("확인"), role: .cancel) { }
         } message: { Text(errorMessage ?? "") }
     }
 
@@ -98,7 +99,7 @@ struct PhotoEditorView: View {
                             })
                     }
                 } else {
-                    ContentUnavailableView("사진을 열 수 없음", systemImage: "photo.badge.exclamationmark")
+                    ContentUnavailableView(L10n.text("사진을 열 수 없음"), systemImage: "photo.badge.exclamationmark")
                 }
                 if isSaving { ProgressView().controlSize(.large) }
             }
@@ -121,22 +122,22 @@ struct PhotoEditorView: View {
         VStack(spacing: 12) {
             HStack(spacing: 24) {
                 Button { quarterTurns = (quarterTurns + 1) % 4 } label: {
-                    Label("회전", systemImage: "rotate.right")
+                    Label(L10n.text("회전"), systemImage: "rotate.right")
                 }
                 Button { isMirrored.toggle() } label: {
-                    Label("좌우 반전", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+                    Label(L10n.text("좌우 반전"), systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
                 }
                 Menu {
                     ForEach(EditorCrop.allCases) { option in
-                        Button(option.rawValue) { crop = option }
+                        Button(option.title) { crop = option }
                     }
                 } label: {
-                    Label(crop.rawValue, systemImage: "crop")
+                    Label(crop.title, systemImage: "crop")
                 }
             }
             .labelStyle(.titleAndIcon)
 
-            TextField("텍스트 추가", text: $overlayText)
+            TextField(L10n.text("텍스트 추가"), text: $overlayText)
                 .textFieldStyle(.roundedBorder)
                 .foregroundStyle(.primary)
 
@@ -144,7 +145,7 @@ struct PhotoEditorView: View {
                 Image(systemName: "textformat.size.smaller")
                 Slider(value: $textSize, in: 16...72)
                 Image(systemName: "textformat.size.larger")
-                ColorPicker("텍스트 색상", selection: $textColor, supportsOpacity: false)
+                ColorPicker(L10n.text("텍스트 색상"), selection: $textColor, supportsOpacity: false)
                     .labelsHidden()
             }
         }

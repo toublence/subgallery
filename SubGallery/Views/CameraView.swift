@@ -8,6 +8,7 @@ struct CameraView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Album.sortOrder) private var albums: [Album]
     @Query(sort: \MediaItem.createdAt, order: .reverse) private var media: [MediaItem]
+    @Query(sort: \CapturePreset.sortOrder) private var presets: [CapturePreset]
     let onOpenLibrary: (AlbumDestination) -> Void
     @StateObject private var camera = CameraController()
     @StateObject private var locationProvider = CaptureLocationProvider()
@@ -25,6 +26,7 @@ struct CameraView: View {
     @AppStorage("camera.lastFlash") private var lastFlash = false
     @AppStorage("camera.destinationAlbumID") private var destinationAlbumID = ""
     @AppStorage("camera.saveLocation") private var savesLocation = false
+    @AppStorage("camera.purposePresetID") private var purposePresetID = "general"
 
     private var destination: StorageDestination {
         StorageDestination(token: destinationAlbumID)
@@ -36,8 +38,25 @@ struct CameraView: View {
     }
 
     private var destinationName: String {
-        if let destinationAlbum { return destinationAlbum.name }
+        if let destinationAlbum { return destinationAlbum.displayName }
         return destination == .temporary ? L10n.text("임시 보관") : L10n.text("카메라")
+    }
+
+    private var selectedPreset: CapturePreset? {
+        if let id = UUID(uuidString: purposePresetID), let preset = presets.first(where: { $0.id == id }) {
+            return preset
+        }
+        return presets.first { $0.purpose == .general }
+    }
+
+    private var activePreset: CapturePreset? {
+        guard let selectedPreset, selectedPreset.purpose != .general else { return nil }
+        return selectedPreset
+    }
+
+    private var purposeName: String {
+        activePreset?.displayName ?? destinationAlbum.map { $0.purpose == .custom ? L10n.text("일반") : $0.purpose.title }
+            ?? L10n.text("일반")
     }
 
     private var libraryThumbnail: MediaItem? {
@@ -51,9 +70,9 @@ struct CameraView: View {
 
     var body: some View {
         cameraWithPersistence
-            .alert("마이크 접근이 필요합니다.", isPresented: $camera.needsMicrophoneSettings) {
-                Button("취소", role: .cancel) { }
-                Button("설정 열기", action: openAppSettings)
+            .alert(L10n.text("마이크 접근이 필요합니다."), isPresented: $camera.needsMicrophoneSettings) {
+                Button(L10n.text("취소"), role: .cancel) { }
+                Button(L10n.text("설정 열기"), action: openAppSettings)
             }
     }
 
@@ -109,11 +128,12 @@ struct CameraView: View {
             camera.flashMode = lastFlash ? .on : .off
             camera.preferredLensID = lastLensID.isEmpty ? nil : lastLensID
             camera.preferredZoomFactor = CGFloat(lastZoom)
+            applyPurposeRules()
             loadedDefaults = true
         }
         camera.onPhoto = storePhoto
         camera.onVideo = storeVideo
-        if savesLocation { locationProvider.requestCurrentLocation() }
+        if shouldSaveLocation { locationProvider.requestCurrentLocation() }
         camera.requestAndStart()
     }
 
@@ -145,7 +165,7 @@ struct CameraView: View {
                 Button { dismiss() } label: { Image(systemName: "xmark") }
                     .disabled(camera.isRecording)
                 Spacer()
-                destinationMenu.disabled(camera.isRecording)
+                purposeMenu.disabled(camera.isRecording)
                 if camera.mode == .photo {
                     Menu {
                         ForEach(["4:3", "1:1", "16:9"], id: \.self) { ratio in Button(ratio) { aspectRatio = ratio } }
@@ -180,9 +200,9 @@ struct CameraView: View {
 
             if camera.mode == .photo { photoAdjustments }
 
-            Picker("촬영 모드", selection: $camera.mode) {
-                Text("사진").tag(MediaKind.photo)
-                Text("동영상").tag(MediaKind.video)
+            Picker(L10n.text("촬영 모드"), selection: $camera.mode) {
+                Text(L10n.text("사진")).tag(MediaKind.photo)
+                Text(L10n.text("동영상")).tag(MediaKind.video)
             }
             .pickerStyle(.segmented)
             .frame(width: 190)
@@ -194,7 +214,7 @@ struct CameraView: View {
                         Button { openInternalLibrary() } label: {
                             MediaThumbnail(item: libraryThumbnail).frame(width: 50, height: 50).clipShape(RoundedRectangle(cornerRadius: 9))
                         }
-                        .accessibilityLabel("SubGallery 보관함 열기")
+                        .accessibilityLabel(L10n.text("SubGallery 보관함 열기"))
                         .disabled(camera.isRecording)
                     } else {
                         Button { openInternalLibrary() } label: {
@@ -202,7 +222,7 @@ struct CameraView: View {
                                 .frame(width: 50, height: 50)
                                 .background(.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 9))
                         }
-                        .accessibilityLabel("SubGallery 보관함 열기")
+                        .accessibilityLabel(L10n.text("SubGallery 보관함 열기"))
                         .disabled(camera.isRecording)
                     }
                 }
@@ -233,30 +253,52 @@ struct CameraView: View {
         .foregroundStyle(.white)
     }
 
-    private var destinationMenu: some View {
+    private var purposeMenu: some View {
         Menu {
-            Button {
-                destinationAlbumID = StorageDestination.camera.token
-            } label: {
-                Label("카메라", systemImage: destination == .camera ? "checkmark" : "camera")
+            Section(L10n.text("촬영 목적")) {
+                ForEach(presets) { preset in
+                    Button {
+                        selectPreset(preset)
+                    } label: {
+                        Label(preset.displayName, systemImage: selectedPreset?.id == preset.id ? "checkmark" : purposeSymbol(preset.purpose))
+                    }
+                }
             }
-            Button {
-                destinationAlbumID = StorageDestination.temporary.token
-            } label: {
-                Label("임시 보관", systemImage: destination == .temporary ? "checkmark" : "clock")
-            }
-            if !albums.isEmpty { Divider() }
-            ForEach(albums) { album in
+            Divider()
+            Menu("저장 위치") {
                 Button {
-                    destinationAlbumID = StorageDestination.album(album.id).token
+                    selectDestination(.camera)
                 } label: {
-                    Label(album.name, systemImage: destinationAlbum?.id == album.id ? "checkmark" : "rectangle.stack")
+                    Label(L10n.text("카메라"), systemImage: destination == .camera ? "checkmark" : "camera")
+                }
+                Button {
+                    selectDestination(.temporary)
+                } label: {
+                    Label(L10n.text("임시 보관"), systemImage: destination == .temporary ? "checkmark" : "clock")
+                }
+                ForEach(albums) { album in
+                    Button {
+                        selectDestination(.album(album.id))
+                    } label: {
+                        Label(album.displayName, systemImage: destinationAlbum?.id == album.id ? "checkmark" : "rectangle.stack")
+                    }
                 }
             }
         } label: {
-            Label(destinationName, systemImage: "folder")
+            Label(purposeName, systemImage: "scope")
                 .font(.caption.weight(.semibold))
                 .lineLimit(1)
+        }
+    }
+
+    private func purposeSymbol(_ purpose: CapturePurpose) -> String {
+        switch purpose {
+        case .general: "camera"
+        case .receipt: "receipt"
+        case .parking: "car.fill"
+        case .document: "doc.text"
+        case .travel: "airplane"
+        case .custom: "scope"
         }
     }
 
@@ -318,11 +360,11 @@ struct CameraView: View {
 
     private var permissionView: some View {
         ContentUnavailableView {
-            Label("카메라 접근 필요", systemImage: "camera.fill")
+            Label(L10n.text("카메라 접근 필요"), systemImage: "camera.fill")
         } description: {
-            Text("촬영한 사진은 SubGallery 안에만 저장됩니다. 카메라 접근을 설정에서 허용해 주세요.")
+            Text(L10n.text("촬영한 사진은 SubGallery 안에만 저장됩니다. 카메라 접근을 설정에서 허용해 주세요."))
         } actions: {
-            Button("설정 열기") {
+            Button(L10n.text("설정 열기")) {
                 if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
             }
             .buttonStyle(.borderedProminent)
@@ -360,7 +402,7 @@ struct CameraView: View {
 
     private func openInternalLibrary() {
         if let album = destinationAlbum {
-            onOpenLibrary(.user(album.id, album.name))
+            onOpenLibrary(.user(album.id, album.displayName))
         } else if destination == .temporary {
             onOpenLibrary(.smart(.temporary))
         } else {
@@ -409,7 +451,7 @@ struct CameraView: View {
             fileSize: stored.fileSize,
             width: stored.width, height: stored.height, duration: stored.duration
         )
-        if savesLocation, let location = locationProvider.latestLocation {
+        if shouldSaveLocation, let location = locationProvider.latestLocation {
             item.latitude = location.coordinate.latitude
             item.longitude = location.coordinate.longitude
         } else {
@@ -417,6 +459,10 @@ struct CameraView: View {
             item.longitude = stored.longitude
         }
         item.albumID = destinationAlbum?.id
+        item.purpose = activePreset?.purpose ?? destinationAlbum?.purpose ?? .general
+        item.analysisEnabled = activePreset?.ocrEnabled ?? destinationAlbum?.ocrEnabled ?? true
+        item.primaryAction = activePreset?.primaryAction ?? destinationAlbum?.primaryAction ?? .automatic
+        item.isPinned = activePreset?.autoPins ?? destinationAlbum?.autoPins ?? false
         let customDate = destinationAlbum?.defaultRetentionDate
             ?? (defaultRetentionDate > 0 ? Date(timeIntervalSince1970: defaultRetentionDate) : nil)
         RetentionService.apply(retention, customDate: customDate, to: item)
@@ -438,6 +484,45 @@ struct CameraView: View {
         }
     }
 
+    private var shouldSaveLocation: Bool {
+        activePreset?.savesLocation ?? destinationAlbum?.savesLocation ?? savesLocation
+    }
+
+    private func selectPreset(_ preset: CapturePreset) {
+        purposePresetID = preset.id.uuidString
+        if preset.purpose == .general {
+            applyDestinationRetention()
+        } else {
+            if let albumID = preset.albumID {
+                destinationAlbumID = StorageDestination.album(albumID).token
+            }
+            retention = preset.retention
+        }
+        if preset.savesLocation { locationProvider.requestCurrentLocation() }
+    }
+
+    private func selectDestination(_ destination: StorageDestination) {
+        purposePresetID = "general"
+        destinationAlbumID = destination.token
+        applyDestinationRetention()
+        if destinationAlbum?.savesLocation == true { locationProvider.requestCurrentLocation() }
+    }
+
+    private func applyPurposeRules() {
+        guard let selectedPreset else {
+            applyDestinationRetention()
+            return
+        }
+        if selectedPreset.purpose == .general {
+            applyDestinationRetention()
+        } else {
+            if let albumID = selectedPreset.albumID {
+                destinationAlbumID = StorageDestination.album(albumID).token
+            }
+            retention = selectedPreset.retention
+        }
+    }
+
     private func persistCameraState(
         _ previous: CameraPersistenceSnapshot,
         _ current: CameraPersistenceSnapshot
@@ -448,7 +533,11 @@ struct CameraView: View {
         lastZoom = current.zoom
         lastFlash = current.flashEnabled
         if previous.destinationAlbumID != current.destinationAlbumID {
-            applyDestinationRetention()
+            if let activePreset {
+                retention = activePreset.retention
+            } else {
+                applyDestinationRetention()
+            }
         }
     }
 }

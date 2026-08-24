@@ -117,6 +117,11 @@ struct SubGalleryApp: App {
                 await prepareUITestFixtureIfNeeded()
                 #endif
                 if dataStore.errorMessage == nil {
+                    CapturePresetService.seedBuiltIns(in: dataStore.container.mainContext)
+                    SharedInboxService.publishConfiguration(
+                        albums: (try? dataStore.container.mainContext.fetch(FetchDescriptor<Album>())) ?? []
+                    )
+                    await SharedInboxService.ingestPendingItems(in: dataStore.container.mainContext)
                     await performExpirationSweep()
                     resumePendingOCR()
                 }
@@ -138,7 +143,10 @@ struct SubGalleryApp: App {
                     obscuresContent = false
                     openPendingReminderIfNeeded()
                     if dataStore.errorMessage == nil {
-                        Task { await performExpirationSweep() }
+                        Task {
+                            await SharedInboxService.ingestPendingItems(in: dataStore.container.mainContext)
+                            await performExpirationSweep()
+                        }
                     }
                     if biometricLock && !isUnlocked { authenticate() }
                 case .inactive, .background:
@@ -167,10 +175,10 @@ struct SubGalleryApp: App {
             isUnlocked = true
             return
         }
-        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: "Touch ID로 보관함 잠금 해제") { success, _ in
+        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: L10n.text("Touch ID로 보관함 잠금 해제")) { success, _ in
             DispatchQueue.main.async {
                 isUnlocked = success
-                biometricErrorMessage = success ? nil : "인증하지 않으면 비공개 보관함을 열 수 없습니다."
+                biometricErrorMessage = success ? nil : L10n.text("인증하지 않으면 비공개 보관함을 열 수 없습니다.")
                 if success {
                     openPendingReminderIfNeeded()
                     applyInitialStartScreenIfNeeded()
@@ -297,9 +305,9 @@ private struct ReminderDestinationView: View {
                 ContentUnavailableView(
                     "사진을 찾을 수 없습니다",
                     systemImage: "photo.badge.exclamationmark",
-                    description: Text("삭제되었거나 더 이상 이 기기에 없는 항목입니다.")
+                    description: Text(L10n.text("삭제되었거나 더 이상 이 기기에 없는 항목입니다."))
                 )
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("닫기") { dismiss() } } }
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L10n.text("닫기")) { dismiss() } } }
             }
         }
     }
@@ -350,7 +358,7 @@ private struct DataStoreErrorView: View {
 
     var body: some View {
         ContentUnavailableView {
-            Label("보관함을 열 수 없습니다", systemImage: "externaldrive.badge.exclamationmark")
+            Label(L10n.text("보관함을 열 수 없습니다"), systemImage: "externaldrive.badge.exclamationmark")
         } description: {
             Text("앱을 완전히 종료한 뒤 다시 실행해 주세요. 문제가 계속되면 아래 오류를 함께 알려주세요.\n\n\(message)")
         }
@@ -367,9 +375,9 @@ struct LockView: View {
             Image(systemName: "touchid")
                 .font(.system(size: 42, weight: .medium))
                 .foregroundStyle(.secondary)
-            Text("SubGallery가 잠겨 있습니다")
+            Text(L10n.text("SubGallery가 잠겨 있습니다"))
                 .font(.title3.weight(.semibold))
-            Text("사진과 동영상은 인증 전까지 표시되지 않습니다.")
+            Text(L10n.text("사진과 동영상은 인증 전까지 표시되지 않습니다."))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             if let errorMessage {
@@ -378,7 +386,7 @@ struct LockView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
-            Button("Touch ID로 잠금 해제", action: unlock)
+            Button(L10n.text("Touch ID로 잠금 해제"), action: unlock)
                 .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

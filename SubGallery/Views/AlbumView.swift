@@ -15,10 +15,10 @@ private enum AlbumGridMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .small: "작은 그리드"
-        case .standard: "기본 그리드"
-        case .large: "큰 그리드"
-        case .original: "원본 비율"
+        case .small: L10n.text("작은 그리드")
+        case .standard: L10n.text("기본 그리드")
+        case .large: L10n.text("큰 그리드")
+        case .original: L10n.text("원본 비율")
         }
     }
 }
@@ -28,11 +28,11 @@ private enum AlbumSortMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .newest: "최신순"
-        case .oldest: "오래된순"
-        case .captured: "촬영일순"
-        case .imported: "가져온 날짜순"
-        case .fileName: "파일 이름순"
+        case .newest: L10n.text("최신순")
+        case .oldest: L10n.text("오래된순")
+        case .captured: L10n.text("촬영일순")
+        case .imported: L10n.text("가져온 날짜순")
+        case .fileName: L10n.text("파일 이름순")
         }
     }
 }
@@ -42,13 +42,13 @@ private enum AlbumFilterMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .all: "전체"
-        case .photo: "사진"
-        case .video: "동영상"
-        case .pinned: "고정"
-        case .temporary: "임시 보관"
-        case .waiting: "완료 대기"
-        case .dueToday: "오늘 정리 예정"
+        case .all: L10n.text("전체")
+        case .photo: L10n.text("사진")
+        case .video: L10n.text("동영상")
+        case .pinned: L10n.text("고정")
+        case .temporary: L10n.text("임시 보관")
+        case .waiting: L10n.text("완료 대기")
+        case .dueToday: L10n.text("오늘 정리 예정")
         }
     }
 }
@@ -61,6 +61,7 @@ struct AlbumView: View {
     @Binding var isCameraPresented: Bool
     @AppStorage("camera.destinationAlbumID") private var cameraDestinationAlbumID = ""
     @AppStorage("privacy.stripMetadata") private var stripsMetadata = false
+    @AppStorage("camera.purposePresetID") private var cameraPurposePresetID = "general"
 
     @State private var selection = Set<UUID>()
     @State private var isSelecting = false
@@ -114,7 +115,7 @@ struct AlbumView: View {
     private var title: String {
         switch destination {
         case .smart(let smart): smart.title
-        case .user(let id, let name): albums.first { $0.id == id }?.name ?? name
+        case .user(let id, let name): albums.first { $0.id == id }?.displayName ?? name
         }
     }
 
@@ -129,6 +130,7 @@ struct AlbumView: View {
         case .smart(.camera): allMedia.filter { $0.deletedAt == nil && $0.source == .camera }
         case .smart(.temporary): allMedia.filter { $0.deletedAt == nil && ($0.expirationDate != nil || $0.waitingForCompletion) }
         case .smart(.pinned): allMedia.filter { $0.deletedAt == nil && $0.isPinned }
+        case .smart(.unclassified): allMedia.filter { $0.deletedAt == nil && $0.albumID == nil }
         case .smart(.recentlyDeleted): allMedia.filter { $0.deletedAt != nil }
         case .user(let id, _): allMedia.filter { $0.deletedAt == nil && $0.albumID == id }
         }
@@ -174,7 +176,7 @@ struct AlbumView: View {
         }
         .overlay {
             if items.isEmpty {
-                ContentUnavailableView("항목 없음", systemImage: "photo", description: Text("촬영하거나 미디어를 가져오면 여기에 표시됩니다."))
+                ContentUnavailableView(L10n.text("항목 없음"), systemImage: "photo", description: Text(L10n.text("촬영하거나 미디어를 가져오면 여기에 표시됩니다.")))
             }
         }
         .navigationTitle(title)
@@ -185,7 +187,7 @@ struct AlbumView: View {
         .toolbar {
             if isSelecting {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(selection.count == items.count ? "전체 선택 해제" : "전체 선택") {
+                    Button(L10n.text(selection.count == items.count ? "전체 선택 해제" : "전체 선택")) {
                         if selection.count == items.count {
                             selection.removeAll()
                         } else {
@@ -204,40 +206,39 @@ struct AlbumView: View {
             if isSelecting {
                 ToolbarItemGroup(placement: .bottomBar) {
                     if isRecentlyDeleted {
-                        Button("복구") { restoreSelected() }.disabled(selection.isEmpty)
+                        Button(L10n.text("복구")) { restoreSelected() }.disabled(selection.isEmpty)
                         Spacer()
-                        Button(role: .destructive) { deleteConfirmation = true } label: { Label("삭제", systemImage: "trash") }
+                        Button(role: .destructive) { deleteConfirmation = true } label: { Label(L10n.text("삭제"), systemImage: "trash") }
                             .disabled(selection.isEmpty)
                     } else {
                         Menu {
                             Button { saveSelectedToPhotos() } label: {
-                                Label("사진 앱에 저장", systemImage: "photo.badge.arrow.down")
+                                Label(L10n.text("사진 앱에 저장"), systemImage: "photo.badge.arrow.down")
                             }
                             Button { prepareFilesExport(selectedItems) } label: {
-                                Label("파일 앱으로 내보내기", systemImage: "folder")
+                                Label(L10n.text("파일 앱으로 내보내기"), systemImage: "folder")
                             }
                             Button { prepareShare(selectedItems) } label: {
-                                Label("공유", systemImage: "square.and.arrow.up")
+                                Label(L10n.text("공유"), systemImage: "square.and.arrow.up")
                             }
                             Divider()
                             Button { showsMoveSheet = true } label: {
-                                Label("앨범으로 이동", systemImage: "rectangle.stack")
+                                Label(L10n.text("앨범으로 이동"), systemImage: "rectangle.stack")
                             }
                             .disabled(albums.isEmpty)
                             Button { showsRetentionSheet = true } label: {
-                                Label("보관 기간 변경", systemImage: "clock")
+                                Label(L10n.text("보관 기간 변경"), systemImage: "clock")
                             }
                             Button { togglePinnedSelected() } label: {
                                 let removesPins = selectedItems.allSatisfy(\.isPinned)
-                                Label(removesPins ? "고정 해제" : "고정", systemImage: removesPins ? "pin.slash" : "pin")
+                                Label(L10n.text(removesPins ? "고정 해제" : "고정"), systemImage: removesPins ? "pin.slash" : "pin")
                             }
                             Button { completeSelected() } label: {
-                                Label("완료 처리", systemImage: "checkmark.circle")
+                                Label(L10n.text("완료 처리"), systemImage: "checkmark.circle")
                             }
-                            .disabled(!selectedItems.contains(where: \.waitingForCompletion))
                             Divider()
                             Button(role: .destructive) { deleteConfirmation = true } label: {
-                                Label("삭제", systemImage: "trash")
+                                Label(L10n.text("삭제"), systemImage: "trash")
                             }
                         } label: {
                             Label(L10n.format("%d개 작업", selection.count), systemImage: "ellipsis.circle")
@@ -265,20 +266,20 @@ struct AlbumView: View {
             FilesExportPicker(urls: preparedExportURLs)
         }
         .onChange(of: photosSelection) { _, selection in importPhotos(selection, into: userAlbum) }
-        .alert("가져올 수 없음", isPresented: Binding(
+        .alert(L10n.text("가져올 수 없음"), isPresented: Binding(
             get: { importError != nil },
             set: { if !$0 { importError = nil } }
         )) {
-            Button("확인", role: .cancel) { }
+            Button(L10n.text("확인"), role: .cancel) { }
         } message: { Text(importError ?? L10n.text("알 수 없는 오류")) }
-        .alert("일괄 작업", isPresented: Binding(
+        .alert(L10n.text("일괄 작업"), isPresented: Binding(
             get: { bulkMessage != nil },
             set: { if !$0 { bulkMessage = nil } }
         )) {
-            Button("확인", role: .cancel) { }
+            Button(L10n.text("확인"), role: .cancel) { }
         } message: { Text(bulkMessage ?? "") }
         .confirmationDialog(
-            isRecentlyDeleted ? "선택한 항목을 영구 삭제할까요?" : "선택한 항목을 최근 삭제로 이동할까요?",
+            L10n.text(isRecentlyDeleted ? "선택한 항목을 영구 삭제할까요?" : "선택한 항목을 최근 삭제로 이동할까요?"),
             isPresented: $deleteConfirmation,
             titleVisibility: .visible
         ) {
@@ -327,34 +328,35 @@ struct AlbumView: View {
                 }
             }
             Divider()
-            if let album = userAlbum {
+            if let album = userAlbum, album.purpose == .travel {
                 NavigationLink {
-                    MediaMapView(albumID: album.id, albumName: album.name)
+                    MediaMapView(albumID: album.id, albumName: album.displayName)
                 } label: {
-                    Label("지도", systemImage: "map")
+                    Label(L10n.text("지도"), systemImage: "map")
                 }
                 .disabled(baseItems.isEmpty)
             }
-            Button { setSelecting(true) } label: { Label("선택", systemImage: "checkmark.circle") }
+            Button { setSelecting(true) } label: { Label(L10n.text("선택"), systemImage: "checkmark.circle") }
         } label: {
-            Label("보기 옵션", systemImage: "ellipsis.circle")
+            Label(L10n.text("보기 옵션"), systemImage: "ellipsis.circle")
         }
     }
 
     private func albumCaptureControls(_ album: Album) -> some View {
         HStack(spacing: 8) {
             PhotosPicker(selection: $photosSelection, maxSelectionCount: 0, matching: .any(of: [.images, .videos])) {
-                Label("사진 가져오기", systemImage: "photo.badge.plus")
+                Label(L10n.text("사진 가져오기"), systemImage: "photo.badge.plus")
                     .padding(.horizontal, 16).padding(.vertical, 12)
             }
 
             Divider().frame(height: 24)
 
             Button {
+                cameraPurposePresetID = "general"
                 cameraDestinationAlbumID = StorageDestination.album(album.id).token
                 isCameraPresented = true
             } label: {
-                Label("카메라", systemImage: "camera.fill")
+                Label(L10n.text("카메라"), systemImage: "camera.fill")
                     .fontWeight(.semibold)
                     .padding(.horizontal, 16).padding(.vertical, 12)
             }
@@ -396,45 +398,45 @@ struct AlbumView: View {
     @ViewBuilder
     private func contextMenu(for item: MediaItem) -> some View {
         if isRecentlyDeleted {
-            Button { item.deletedAt = nil } label: { Label("복구", systemImage: "arrow.uturn.backward") }
-            Button(role: .destructive) { permanentlyDelete(item) } label: { Label("지금 삭제", systemImage: "trash") }
+            Button { MediaLifecycleService.restore(item); try? modelContext.save() } label: {
+                Label(L10n.text("복구"), systemImage: "arrow.uturn.backward")
+            }
+            Button(role: .destructive) { permanentlyDelete(item) } label: { Label(L10n.text("지금 삭제"), systemImage: "trash") }
         } else {
-            if item.waitingForCompletion {
-                Button { Task { await MediaLifecycleService.complete(item) } } label: {
-                    Label("완료", systemImage: "checkmark.circle")
-                }
+            Button { Task { await MediaLifecycleService.complete(item); try? modelContext.save() } } label: {
+                Label(L10n.text("완료"), systemImage: "checkmark.circle")
             }
             Button { togglePin(item) } label: {
                 Label(L10n.text(item.isPinned ? "고정 해제" : "고정"), systemImage: item.isPinned ? "pin.slash" : "pin")
             }
             Button { item.favorite.toggle() } label: {
-                Label(item.favorite ? "즐겨찾기 해제" : "즐겨찾기", systemImage: item.favorite ? "heart.slash" : "heart")
+                Label(L10n.text(item.favorite ? "즐겨찾기 해제" : "즐겨찾기"), systemImage: item.favorite ? "heart.slash" : "heart")
             }
             Menu("보관 기간") {
                 ForEach(RetentionPolicy.allCases.filter { $0 != .customDate }) { policy in
                     Button(policy.title) { RetentionService.apply(policy, to: item) }
                 }
             }
-            Button { prepareShare([item]) } label: { Label("공유", systemImage: "square.and.arrow.up") }
+            Button { prepareShare([item]) } label: { Label(L10n.text("공유"), systemImage: "square.and.arrow.up") }
             Button(role: .destructive) {
                 Task { await MediaLifecycleService.moveToRecentlyDeleted(item) }
-            } label: { Label("삭제", systemImage: "trash") }
+            } label: { Label(L10n.text("삭제"), systemImage: "trash") }
         }
     }
 
     private var albumPicker: some View {
         NavigationStack {
             List(albums) { album in
-                Button(album.name) {
+                Button(album.displayName) {
                     allMedia.filter { selection.contains($0.id) }.forEach { $0.albumID = album.id }
                     try? modelContext.save()
                     selection.removeAll(); isSelecting = false; showsMoveSheet = false
                 }
             }
-            .overlay { if albums.isEmpty { ContentUnavailableView("앨범 없음", systemImage: "rectangle.stack.badge.plus") } }
-            .navigationTitle("앨범으로 이동")
+            .overlay { if albums.isEmpty { ContentUnavailableView(L10n.text("앨범 없음"), systemImage: "rectangle.stack.badge.plus") } }
+            .navigationTitle(L10n.text("앨범으로 이동"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("취소") { showsMoveSheet = false } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L10n.text("취소")) { showsMoveSheet = false } } }
         }
         .presentationDetents([.large])
     }
@@ -500,6 +502,7 @@ struct AlbumView: View {
 
     private func restoreSelected() {
         allMedia.filter { selection.contains($0.id) }.forEach(MediaLifecycleService.restore)
+        try? modelContext.save()
         selection.removeAll()
     }
 
@@ -520,7 +523,7 @@ struct AlbumView: View {
     }
 
     private func completeSelected() {
-        let completing = selectedItems.filter(\.waitingForCompletion)
+        let completing = selectedItems
         Task {
             for item in completing {
                 await MediaLifecycleService.complete(item)
@@ -615,6 +618,10 @@ struct AlbumView: View {
         item.latitude = stored.latitude
         item.longitude = stored.longitude
         item.albumID = album.id
+        item.purpose = album.purpose
+        item.analysisEnabled = album.ocrEnabled
+        item.primaryAction = album.primaryAction
+        item.isPinned = album.autoPins
         RetentionService.apply(album.defaultRetention, customDate: album.defaultRetentionDate, to: item)
         modelContext.insert(item)
         try? modelContext.save()
@@ -637,15 +644,15 @@ struct BatchRetentionPickerView: View {
                         Button(policy.title) { apply(policy) }
                     }
                 }
-                Section("날짜 지정") {
-                    DatePicker("보관 기한", selection: $customDate, in: Date.now..., displayedComponents: [.date, .hourAndMinute])
-                    Button("이 날짜까지 보관") { apply(.customDate) }
+                Section(L10n.text("날짜 지정")) {
+                    DatePicker(L10n.text("보관 기한"), selection: $customDate, in: Date.now..., displayedComponents: [.date, .hourAndMinute])
+                    Button(L10n.text("이 날짜까지 보관")) { apply(.customDate) }
                 }
             }
             .navigationTitle(L10n.format("%d개 보관 기간", items.count))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("취소") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(L10n.text("취소")) { dismiss() } }
             }
         }
         .presentationDetents([.large])
@@ -711,7 +718,7 @@ struct MediaGridCell: View {
         }
         .frame(width: 28, height: 28)
         .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-        .accessibilityLabel(isSelected ? "선택됨" : "선택 안 됨")
+        .accessibilityLabel(L10n.text(isSelected ? "선택됨" : "선택 안 됨"))
     }
 
     private var cellContent: some View {
