@@ -1,0 +1,5 @@
+"NSCameraUsageDescription" = "El acceso a la cámara permite capturar fotos y vídeos en SubGallery.";
+"NSMicrophoneUsageDescription" = "El acceso al micrófono permite grabar audio con los vídeos.";
+"NSLocationWhenInUseUsageDescription" = "La ubicación solo se usa si eliges guardarla con las fotos.";
+"NSPhotoLibraryUsageDescription" = "El acceso a Fotos permite importar las fotos seleccionadas.";
+"NSPhotoLibraryAddUsageDescription" = "El acceso a Fotos permite exportar los elementos seleccionados.";

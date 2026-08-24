@@ -64,7 +64,7 @@ struct PremiumView: View {
                             Button { selectedID = product.id } label: {
                                 HStack {
                                     VStack(alignment: .leading) {
-                                        Text(product.id.hasSuffix("yearly") ? "연간" : "월간").font(.headline)
+                                        Text(L10n.text(product.id.hasSuffix("yearly") ? "연간" : "월간")).font(.headline)
                                         if product.id.hasSuffix("yearly") { Text("추천").font(.caption).foregroundStyle(.tint) }
                                     }
                                     Spacer(); Text(product.displayPrice).font(.headline)
@@ -92,8 +92,8 @@ struct PremiumView: View {
 }
 
 private struct FeatureRow: View {
-    let title: String
+    let title: LocalizedStringKey
     let symbol: String
-    init(_ title: String, symbol: String) { self.title = title; self.symbol = symbol }
+    init(_ title: LocalizedStringKey, symbol: String) { self.title = title; self.symbol = symbol }
     var body: some View { Label(title, systemImage: symbol).font(.headline).frame(maxWidth: .infinity, alignment: .leading) }
 }

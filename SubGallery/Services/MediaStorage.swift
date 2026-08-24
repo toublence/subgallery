@@ -9,6 +9,7 @@ struct StoredMedia: Sendable {
     let kind: MediaKind
     let relativePath: String
     let thumbnailRelativePath: String?
+    let fileName: String
     let fileSize: Int64
     let width: Int
     let height: Int
@@ -39,7 +40,13 @@ actor MediaStorage {
         let relativePath = "Media/\(filename)-\(id).\(fileExtension)"
         let destination = Self.url(for: relativePath)
         try data.write(to: destination, options: .atomic)
-        return try inspectAndThumbnail(url: destination, relativePath: relativePath, kind: kind, id: id)
+        return try inspectAndThumbnail(
+            url: destination,
+            relativePath: relativePath,
+            kind: kind,
+            id: id,
+            fileName: preferredName ?? destination.lastPathComponent
+        )
     }
 
     func store(fileAt source: URL, type: UTType? = nil) throws -> StoredMedia {
@@ -51,7 +58,13 @@ actor MediaStorage {
         let relativePath = "Media/\(id).\(ext)"
         let destination = Self.url(for: relativePath)
         try fileManager.copyItem(at: source, to: destination)
-        return try inspectAndThumbnail(url: destination, relativePath: relativePath, kind: kind, id: id)
+        return try inspectAndThumbnail(
+            url: destination,
+            relativePath: relativePath,
+            kind: kind,
+            id: id,
+            fileName: source.lastPathComponent
+        )
     }
 
     func remove(_ item: MediaItem) throws {
@@ -66,7 +79,13 @@ actor MediaStorage {
         try fileManager.createDirectory(at: Self.rootURL.appending(path: "Thumbnails"), withIntermediateDirectories: true)
     }
 
-    private func inspectAndThumbnail(url: URL, relativePath: String, kind: MediaKind, id: String) throws -> StoredMedia {
+    private func inspectAndThumbnail(
+        url: URL,
+        relativePath: String,
+        kind: MediaKind,
+        id: String,
+        fileName: String
+    ) throws -> StoredMedia {
         let attributes = try fileManager.attributesOfItem(atPath: url.path)
         let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
         var width = 0
@@ -109,6 +128,7 @@ actor MediaStorage {
             kind: kind,
             relativePath: relativePath,
             thumbnailRelativePath: thumbnailPath,
+            fileName: fileName,
             fileSize: size,
             width: width,
             height: height,
@@ -116,4 +136,3 @@ actor MediaStorage {
         )
     }
 }
-

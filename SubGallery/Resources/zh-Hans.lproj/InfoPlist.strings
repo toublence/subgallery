@@ -1,0 +1,5 @@
+"NSCameraUsageDescription" = "相机权限用于在SubGallery中拍摄照片和视频。";
+"NSMicrophoneUsageDescription" = "麦克风权限用于为视频录制声音。";
+"NSLocationWhenInUseUsageDescription" = "仅在你选择为照片存储位置时使用位置信息。";
+"NSPhotoLibraryUsageDescription" = "照片权限用于导入所选照片。";
+"NSPhotoLibraryAddUsageDescription" = "照片权限用于将所选项目导出到照片App。";

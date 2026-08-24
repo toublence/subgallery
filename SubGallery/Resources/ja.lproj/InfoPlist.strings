@@ -1,0 +1,5 @@
+"NSCameraUsageDescription" = "SubGalleryで写真とビデオを撮影するためにカメラを使用します。";
+"NSMicrophoneUsageDescription" = "ビデオの音声を録音するためにマイクを使用します。";
+"NSLocationWhenInUseUsageDescription" = "写真に位置情報を保存する場合にのみ位置情報を使用します。";
+"NSPhotoLibraryUsageDescription" = "選択した写真を読み込むために写真へのアクセスを使用します。";
+"NSPhotoLibraryAddUsageDescription" = "選択した項目を書き出すために写真へのアクセスを使用します。";

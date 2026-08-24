@@ -1,0 +1,5 @@
+"NSCameraUsageDescription" = "Der Kamerazugriff wird zum Aufnehmen von Fotos und Videos in SubGallery verwendet.";
+"NSMicrophoneUsageDescription" = "Der Mikrofonzugriff wird für den Ton bei Videoaufnahmen verwendet.";
+"NSLocationWhenInUseUsageDescription" = "Der Standort wird nur gespeichert, wenn Sie dies für Fotos auswählen.";
+"NSPhotoLibraryUsageDescription" = "Der Fotozugriff wird zum Importieren ausgewählter Fotos verwendet.";
+"NSPhotoLibraryAddUsageDescription" = "Der Fotozugriff wird zum Exportieren ausgewählter Elemente verwendet.";

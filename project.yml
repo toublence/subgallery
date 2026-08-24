@@ -26,6 +26,17 @@ targets:
       path: SubGallery/Resources/Info.plist
       properties:
         CFBundleDisplayName: SubGallery
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations:
+          - en
+          - ko
+          - de
+          - es
+          - fr
+          - ja
+          - ar
+          - zh-Hans
+          - zh-Hant
         LSApplicationCategoryType: public.app-category.photo-video
         NSPhotoLibraryAddUsageDescription: 내보내기를 선택한 항목만 사진 앱에 저장합니다.
         NSCameraUsageDescription: 사진과 동영상을 SubGallery에 촬영하기 위해 카메라를 사용합니다.
@@ -53,3 +64,27 @@ targets:
           - iCloud.com.namslab.subgallery
         com.apple.developer.icloud-services:
           - CloudKit
+  SubGalleryTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: SubGalleryTests
+    dependencies:
+      - target: SubGallery
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.namslab.subgallery.tests
+        GENERATE_INFOPLIST_FILE: true
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/SubGallery.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SubGallery"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+  SubGalleryUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: SubGalleryUITests
+    dependencies:
+      - target: SubGallery
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.namslab.subgallery.uitests
+        GENERATE_INFOPLIST_FILE: true

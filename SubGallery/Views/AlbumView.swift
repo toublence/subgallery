@@ -1,34 +1,55 @@
 import AVKit
 import Photos
+import PhotosUI
 import SwiftData
 import SwiftUI
+
+private struct TemporaryGroup: Identifiable {
+    let title: String
+    let items: [MediaItem]
+    var id: String { title }
+}
 
 struct AlbumView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \MediaItem.createdAt, order: .reverse) private var allMedia: [MediaItem]
     @Query(sort: \Album.sortOrder) private var albums: [Album]
     let destination: AlbumDestination
+    @Binding var isCameraPresented: Bool
+    @AppStorage("camera.destinationAlbumID") private var cameraDestinationAlbumID = ""
 
     @State private var selection = Set<UUID>()
     @State private var isSelecting = false
     @State private var viewerItem: MediaItem?
     @State private var showsMoveSheet = false
+    @State private var showsRetentionSheet = false
+    @State private var showsShareSheet = false
+    @State private var showsFilesExporter = false
     @State private var deleteConfirmation = false
+    @State private var photosSelection: [PhotosPickerItem] = []
+    @State private var importError: String?
+    @State private var bulkMessage: String?
 
-    private let columns = [GridItem(.adaptive(minimum: 94, maximum: 180), spacing: 2)]
+    private let columns = [GridItem(.adaptive(minimum: 94, maximum: 180), spacing: 4)]
 
     private var title: String {
         switch destination {
         case .smart(let smart): smart.title
-        case .user(_, let name): name
+        case .user(let id, let name): albums.first { $0.id == id }?.name ?? name
         }
+    }
+
+    private var userAlbum: Album? {
+        guard case .user(let id, _) = destination else { return nil }
+        return albums.first { $0.id == id }
     }
 
     private var items: [MediaItem] {
         switch destination {
         case .smart(.all): allMedia.filter { $0.deletedAt == nil }
         case .smart(.camera): allMedia.filter { $0.deletedAt == nil && $0.source == .camera }
-        case .smart(.temporary): allMedia.filter { $0.deletedAt == nil && $0.expirationDate != nil }
+        case .smart(.temporary): allMedia.filter { $0.deletedAt == nil && ($0.expirationDate != nil || $0.waitingForCompletion) }
+        case .smart(.pinned): allMedia.filter { $0.deletedAt == nil && $0.isPinned }
         case .smart(.recentlyDeleted): allMedia.filter { $0.deletedAt != nil }
         case .user(let id, _): allMedia.filter { $0.deletedAt == nil && $0.albumID == id }
         }
@@ -39,19 +60,33 @@ struct AlbumView: View {
         return false
     }
 
+    private var selectedItems: [MediaItem] {
+        items.filter { selection.contains($0.id) }
+    }
+
     var body: some View {
         ScrollView {
             if case .smart(.temporary) = destination { temporarySummary }
-            LazyVGrid(columns: columns, spacing: 2) {
-                ForEach(items) { item in
-                    MediaGridCell(item: item, isSelected: selection.contains(item.id))
-                        .onTapGesture {
-                            if isSelecting { toggle(item.id) } else { viewerItem = item }
+            LazyVGrid(columns: columns, spacing: 4) {
+                if case .smart(.temporary) = destination {
+                    ForEach(temporaryGroups) { group in
+                        Section {
+                            ForEach(group.items) { item in mediaCell(item) }
+                        } header: {
+                            Text(group.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, 12)
                         }
-                        .contextMenu { contextMenu(for: item) }
-                        .accessibilityAddTraits(selection.contains(item.id) ? .isSelected : [])
+                    }
+                } else {
+                    ForEach(items) { item in mediaCell(item) }
                 }
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 20)
         }
         .overlay {
             if items.isEmpty {
@@ -60,24 +95,65 @@ struct AlbumView: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            if let album = userAlbum, !isSelecting { albumCaptureControls(album) }
+        }
         .toolbar {
+            if isSelecting {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(selection.count == items.count ? "전체 선택 해제" : "전체 선택") {
+                        if selection.count == items.count {
+                            selection.removeAll()
+                        } else {
+                            selection = Set(items.map(\.id))
+                        }
+                    }
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
-                Button(isSelecting ? "완료" : "선택") {
+                Button(L10n.text(isSelecting ? "완료" : "선택")) {
                     withAnimation { isSelecting.toggle(); selection.removeAll() }
                 }
                 .disabled(items.isEmpty)
             }
             if isSelecting {
                 ToolbarItemGroup(placement: .bottomBar) {
-                    Button { showsMoveSheet = true } label: { Label("이동", systemImage: "folder") }
-                        .disabled(selection.isEmpty || isRecentlyDeleted)
-                    Spacer()
                     if isRecentlyDeleted {
                         Button("복구") { restoreSelected() }.disabled(selection.isEmpty)
                         Spacer()
-                    }
-                    Button(role: .destructive) { deleteConfirmation = true } label: { Label("삭제", systemImage: "trash") }
+                        Button(role: .destructive) { deleteConfirmation = true } label: { Label("삭제", systemImage: "trash") }
+                            .disabled(selection.isEmpty)
+                    } else {
+                        Menu {
+                            Button { saveSelectedToPhotos() } label: {
+                                Label("Photos에 저장", systemImage: "photo.badge.arrow.down")
+                            }
+                            Button { showsFilesExporter = true } label: {
+                                Label("Files로 내보내기", systemImage: "folder")
+                            }
+                            Button { showsShareSheet = true } label: {
+                                Label("공유", systemImage: "square.and.arrow.up")
+                            }
+                            Divider()
+                            Button { showsMoveSheet = true } label: {
+                                Label("앨범으로 이동", systemImage: "rectangle.stack")
+                            }
+                            .disabled(albums.isEmpty)
+                            Button { showsRetentionSheet = true } label: {
+                                Label("보관 기간 변경", systemImage: "clock")
+                            }
+                            Button { pinSelected() } label: {
+                                Label("고정", systemImage: "pin")
+                            }
+                            Divider()
+                            Button(role: .destructive) { deleteConfirmation = true } label: {
+                                Label("삭제", systemImage: "trash")
+                            }
+                        } label: {
+                            Label(L10n.format("%d개 작업", selection.count), systemImage: "ellipsis.circle")
+                        }
                         .disabled(selection.isEmpty)
+                    }
                 }
             }
         }
@@ -85,13 +161,84 @@ struct AlbumView: View {
             MediaViewer(items: items, initialID: item.id, isRecentlyDeleted: isRecentlyDeleted)
         }
         .sheet(isPresented: $showsMoveSheet) { albumPicker }
+        .sheet(isPresented: $showsRetentionSheet) {
+            BatchRetentionPickerView(items: selectedItems) {
+                selection.removeAll()
+                isSelecting = false
+                showsRetentionSheet = false
+            }
+        }
+        .sheet(isPresented: $showsShareSheet) {
+            ActivityShareSheet(urls: selectedItems.map { MediaStorage.url(for: $0.localPath) })
+        }
+        .sheet(isPresented: $showsFilesExporter) {
+            FilesExportPicker(urls: selectedItems.map { MediaStorage.url(for: $0.localPath) })
+        }
+        .onChange(of: photosSelection) { _, selection in importPhotos(selection, into: userAlbum) }
+        .alert("가져올 수 없음", isPresented: Binding(
+            get: { importError != nil },
+            set: { if !$0 { importError = nil } }
+        )) {
+            Button("확인", role: .cancel) { }
+        } message: { Text(importError ?? L10n.text("알 수 없는 오류")) }
+        .alert("일괄 작업", isPresented: Binding(
+            get: { bulkMessage != nil },
+            set: { if !$0 { bulkMessage = nil } }
+        )) {
+            Button("확인", role: .cancel) { }
+        } message: { Text(bulkMessage ?? "") }
         .confirmationDialog(
             isRecentlyDeleted ? "선택한 항목을 영구 삭제할까요?" : "선택한 항목을 최근 삭제로 이동할까요?",
             isPresented: $deleteConfirmation,
             titleVisibility: .visible
         ) {
-            Button(isRecentlyDeleted ? "영구 삭제" : "삭제", role: .destructive) { deleteSelected() }
+            Button(L10n.text(isRecentlyDeleted ? "영구 삭제" : "삭제"), role: .destructive) { deleteSelected() }
         }
+    }
+
+    private func mediaCell(_ item: MediaItem) -> some View {
+        MediaGridCell(item: item, isSelected: selection.contains(item.id))
+            .onTapGesture {
+                if isSelecting { toggle(item.id) } else { viewerItem = item }
+            }
+            .contextMenu { contextMenu(for: item) }
+            .accessibilityAddTraits(selection.contains(item.id) ? .isSelected : [])
+    }
+
+    private func albumCaptureControls(_ album: Album) -> some View {
+        HStack(spacing: 8) {
+            PhotosPicker(selection: $photosSelection, maxSelectionCount: 0, matching: .any(of: [.images, .videos])) {
+                Label("사진 가져오기", systemImage: "photo.badge.plus")
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+            }
+
+            Divider().frame(height: 24)
+
+            Button {
+                cameraDestinationAlbumID = album.id.uuidString
+                isCameraPresented = true
+            } label: {
+                Label("카메라", systemImage: "camera.fill")
+                    .fontWeight(.semibold)
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+            }
+        }
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().stroke(.separator.opacity(0.25), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
+        .padding(.bottom, 8)
+    }
+
+    private var temporaryGroups: [TemporaryGroup] {
+        let now = Date.now
+        let endOfToday = Calendar.current.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
+        let week = Calendar.current.date(byAdding: .day, value: 7, to: now) ?? now
+        return [
+            TemporaryGroup(title: L10n.text("완료 대기"), items: items.filter { $0.waitingForCompletion }),
+            TemporaryGroup(title: L10n.text("오늘 정리 예정"), items: items.filter { !$0.waitingForCompletion && ($0.expirationDate ?? .distantFuture) <= endOfToday }),
+            TemporaryGroup(title: L10n.text("7일 이내 정리"), items: items.filter { !$0.waitingForCompletion && ($0.expirationDate ?? .distantFuture) > endOfToday && ($0.expirationDate ?? .distantFuture) <= week }),
+            TemporaryGroup(title: L10n.text("이후 정리"), items: items.filter { !$0.waitingForCompletion && ($0.expirationDate ?? .distantFuture) > week })
+        ].filter { !$0.items.isEmpty }
     }
 
     private var temporarySummary: some View {
@@ -100,13 +247,14 @@ struct AlbumView: View {
         let soon = items.filter { ($0.expirationDate ?? .distantFuture) <= week }.count
         return HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(items.count)개 · \(ByteCountFormatter.string(fromByteCount: total, countStyle: .file))")
+                Text(L10n.format("%d개 · %@", items.count, ByteCountFormatter.string(fromByteCount: total, countStyle: .file)))
                     .font(.headline)
-                Text("이번 주 정리 예정 \(soon)개").font(.subheadline).foregroundStyle(.secondary)
+                Text(L10n.format("이번 주 정리 예정 %d개", soon)).font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer()
         }
-        .padding()
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
     }
 
     @ViewBuilder
@@ -115,16 +263,26 @@ struct AlbumView: View {
             Button { item.deletedAt = nil } label: { Label("복구", systemImage: "arrow.uturn.backward") }
             Button(role: .destructive) { permanentlyDelete(item) } label: { Label("지금 삭제", systemImage: "trash") }
         } else {
+            if item.waitingForCompletion {
+                Button { Task { await MediaLifecycleService.complete(item) } } label: {
+                    Label("완료", systemImage: "checkmark.circle")
+                }
+            }
+            Button { togglePin(item) } label: {
+                Label(L10n.text(item.isPinned ? "고정 해제" : "고정"), systemImage: item.isPinned ? "pin.slash" : "pin")
+            }
             Button { item.favorite.toggle() } label: {
                 Label(item.favorite ? "즐겨찾기 해제" : "즐겨찾기", systemImage: item.favorite ? "heart.slash" : "heart")
             }
             Menu("보관 기간") {
-                ForEach(RetentionPolicy.allCases) { policy in
-                    Button(policy.title) { item.expirationDate = policy.expiration() }
+                ForEach(RetentionPolicy.allCases.filter { $0 != .customDate }) { policy in
+                    Button(policy.title) { RetentionService.apply(policy, to: item) }
                 }
             }
             ShareLink(item: MediaStorage.url(for: item.localPath)) { Label("공유", systemImage: "square.and.arrow.up") }
-            Button(role: .destructive) { item.deletedAt = .now } label: { Label("삭제", systemImage: "trash") }
+            Button(role: .destructive) {
+                Task { await MediaLifecycleService.moveToRecentlyDeleted(item) }
+            } label: { Label("삭제", systemImage: "trash") }
         }
     }
 
@@ -133,7 +291,8 @@ struct AlbumView: View {
             List(albums) { album in
                 Button(album.name) {
                     allMedia.filter { selection.contains($0.id) }.forEach { $0.albumID = album.id }
-                    selection.removeAll(); showsMoveSheet = false
+                    try? modelContext.save()
+                    selection.removeAll(); isSelecting = false; showsMoveSheet = false
                 }
             }
             .overlay { if albums.isEmpty { ContentUnavailableView("앨범 없음", systemImage: "rectangle.stack.badge.plus") } }
@@ -141,30 +300,128 @@ struct AlbumView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("취소") { showsMoveSheet = false } } }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
     }
 
     private func toggle(_ id: UUID) {
         if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
     }
 
+    private func togglePin(_ item: MediaItem) {
+        item.isPinned.toggle()
+        if !item.isPinned && RetentionService.shouldMoveToRecentlyDeleted(item) {
+            Task { await MediaLifecycleService.moveToRecentlyDeleted(item) }
+        }
+        try? modelContext.save()
+    }
+
     private func restoreSelected() {
-        allMedia.filter { selection.contains($0.id) }.forEach { $0.deletedAt = nil }
+        allMedia.filter { selection.contains($0.id) }.forEach(MediaLifecycleService.restore)
         selection.removeAll()
+    }
+
+    private func pinSelected() {
+        selectedItems.forEach { $0.isPinned = true }
+        try? modelContext.save()
+        selection.removeAll()
+        isSelecting = false
+    }
+
+    private func saveSelectedToPhotos() {
+        let exporting = selectedItems
+        Task {
+            do {
+                try await MediaExportService.saveToPhotos(exporting)
+                bulkMessage = L10n.format("%d개 항목을 Photos에 저장했습니다.", exporting.count)
+                selection.removeAll()
+                isSelecting = false
+            } catch {
+                bulkMessage = error.localizedDescription
+            }
+        }
     }
 
     private func deleteSelected() {
         let selected = allMedia.filter { selection.contains($0.id) }
         if isRecentlyDeleted { selected.forEach(permanentlyDelete) }
-        else { selected.forEach { $0.deletedAt = .now } }
+        else { selected.forEach { item in Task { await MediaLifecycleService.moveToRecentlyDeleted(item) } } }
         selection.removeAll()
     }
 
     private func permanentlyDelete(_ item: MediaItem) {
         Task {
-            try? await MediaStorage.shared.remove(item)
-            await MainActor.run { modelContext.delete(item) }
+            await MediaLifecycleService.permanentlyDelete(item, from: modelContext)
         }
+    }
+
+    private func importPhotos(_ selection: [PhotosPickerItem], into album: Album?) {
+        guard !selection.isEmpty, let album else { return }
+        Task {
+            defer { photosSelection = [] }
+            for selectionItem in selection {
+                do {
+                    guard let data = try await selectionItem.loadTransferable(type: Data.self) else { continue }
+                    let stored = try await MediaStorage.shared.store(
+                        data: data,
+                        type: selectionItem.supportedContentTypes.first
+                    )
+                    insert(stored, into: album)
+                } catch {
+                    importError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func insert(_ stored: StoredMedia, into album: Album) {
+        let item = MediaItem(
+            kind: stored.kind, source: .photos, localPath: stored.relativePath,
+            thumbnailPath: stored.thumbnailRelativePath, fileName: stored.fileName,
+            fileSize: stored.fileSize, width: stored.width, height: stored.height, duration: stored.duration
+        )
+        item.albumID = album.id
+        RetentionService.apply(album.defaultRetention, customDate: album.defaultRetentionDate, to: item)
+        modelContext.insert(item)
+        try? modelContext.save()
+        OCRService.enqueue(item, in: modelContext)
+    }
+}
+
+struct BatchRetentionPickerView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    let items: [MediaItem]
+    let onDone: () -> Void
+    @State private var customDate = Calendar.current.date(byAdding: .day, value: 1, to: .now) ?? .now
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    ForEach(RetentionPolicy.allCases.filter { $0 != .customDate }) { policy in
+                        Button(policy.title) { apply(policy) }
+                    }
+                }
+                Section("날짜 지정") {
+                    DatePicker("보관 기한", selection: $customDate, in: Date.now..., displayedComponents: [.date, .hourAndMinute])
+                    Button("이 날짜까지 보관") { apply(.customDate) }
+                }
+            }
+            .navigationTitle(L10n.format("%d개 보관 기간", items.count))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("취소") { dismiss() } }
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    private func apply(_ policy: RetentionPolicy) {
+        items.forEach { RetentionService.apply(policy, customDate: policy == .customDate ? customDate : nil, to: $0) }
+        try? modelContext.save()
+        onDone()
+        dismiss()
     }
 }
 
@@ -173,6 +430,18 @@ struct MediaGridCell: View {
     let isSelected: Bool
 
     var body: some View {
+        Rectangle()
+            .fill(.quaternary)
+            .aspectRatio(1, contentMode: .fit)
+            .overlay { cellContent }
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(item.fileName.isEmpty ? L10n.text("사진") : item.fileName)
+            .accessibilityValue(item.waitingForCompletion || item.expirationDate != nil ? RetentionService.statusText(for: item) : "")
+    }
+
+    private var cellContent: some View {
         ZStack(alignment: .bottomTrailing) {
             MediaThumbnail(item: item)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -182,23 +451,26 @@ struct MediaGridCell: View {
                     .font(.caption2.weight(.semibold)).foregroundStyle(.white)
                     .padding(5).shadow(radius: 2)
             }
-            if let expiration = item.expirationDate {
-                Text(expiration.formatted(.relative(presentation: .named)))
+            if item.waitingForCompletion || item.expirationDate != nil {
+                Text(RetentionService.statusText(for: item))
                     .font(.caption2.weight(.semibold)).foregroundStyle(.white)
                     .padding(5).background(.black.opacity(0.45), in: Capsule()).padding(4)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            if item.isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.white)
+                    .padding(6).background(.black.opacity(0.4), in: Circle()).padding(4)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
             if isSelected {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.title2).symbolRenderingMode(.palette).foregroundStyle(.white, .blue).padding(6)
             }
         }
-        .aspectRatio(1, contentMode: .fit)
-        .contentShape(Rectangle())
     }
 
     private var duration: String {
         Duration.seconds(item.duration).formatted(.time(pattern: .minuteSecond))
     }
 }
-

@@ -1,0 +1,5 @@
+"NSCameraUsageDescription" = "يُستخدم الوصول إلى الكاميرا لالتقاط الصور والفيديو في SubGallery.";
+"NSMicrophoneUsageDescription" = "يُستخدم الوصول إلى الميكروفون لتسجيل الصوت مع الفيديو.";
+"NSLocationWhenInUseUsageDescription" = "يُستخدم الموقع فقط عند اختيار حفظه مع الصور.";
+"NSPhotoLibraryUsageDescription" = "يُستخدم الوصول إلى الصور لاستيراد الصور المحددة.";
+"NSPhotoLibraryAddUsageDescription" = "يُستخدم الوصول إلى الصور لتصدير العناصر المحددة.";
