@@ -56,6 +56,9 @@ enum L10n {
         let bundle = localizedBundle(for: selected.resolvedIdentifier)
         let value = bundle?.localizedString(forKey: key, value: nil, table: nil)
         if let value, value != key { return value }
+        if selected.resolvedIdentifier == "ko", key.range(of: "[가-힣]", options: .regularExpression) != nil {
+            return key
+        }
         return localizedBundle(for: "en")?.localizedString(forKey: key, value: key, table: nil) ?? key
     }
 

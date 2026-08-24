@@ -16,6 +16,7 @@ struct MediaViewer: View {
     @State private var showsRetention = false
     @State private var showsReminder = false
     @State private var showsAlbumMove = false
+    @State private var showsEditor = false
 
     init(items: [MediaItem], initialID: UUID, isRecentlyDeleted: Bool) {
         self.items = items
@@ -71,6 +72,11 @@ struct MediaViewer: View {
         .sheet(isPresented: $showsRetention) { if let current { RetentionPickerView(item: current) } }
         .sheet(isPresented: $showsReminder) { if let current { ReminderPickerView(item: current) } }
         .sheet(isPresented: $showsAlbumMove) { albumMovePicker }
+        .fullScreenCover(isPresented: $showsEditor) {
+            if let current {
+                PhotoEditorView(item: current) { _ in }
+            }
+        }
         .confirmationDialog("이 항목을 삭제할까요?", isPresented: $showsDelete) {
             Button(L10n.text(isRecentlyDeleted ? "영구 삭제" : "삭제"), role: .destructive) { deleteCurrent() }
         }
@@ -79,6 +85,10 @@ struct MediaViewer: View {
     @ViewBuilder
     private func actionsMenu(for item: MediaItem) -> some View {
         Menu {
+            if item.kind == .photo {
+                Button { showsEditor = true } label: { Label("편집", systemImage: "slider.horizontal.3") }
+                Divider()
+            }
             Button {
                 item.isPinned.toggle()
                 if !item.isPinned && RetentionService.shouldMoveToRecentlyDeleted(item) {

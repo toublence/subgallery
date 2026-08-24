@@ -2,6 +2,19 @@
 import SwiftUI
 import UIKit
 
+struct CameraVideoOption: Identifiable, Hashable {
+    let width: Int32
+    let height: Int32
+    let fps: Int
+
+    var id: String { "\(width)x\(height)-\(fps)" }
+    var resolutionTitle: String {
+        if width >= 3_800 { return "4K" }
+        return "\(height)p"
+    }
+    var title: String { "\(resolutionTitle) · \(fps) FPS" }
+}
+
 final class CameraController: NSObject, ObservableObject {
     let session = AVCaptureSession()
     @Published var authorization: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
@@ -13,6 +26,15 @@ final class CameraController: NSObject, ObservableObject {
     @Published var flashMode: AVCaptureDevice.FlashMode = .off
     @Published var recordingDuration: TimeInterval = 0
     @Published var zoomFactor: CGFloat = 1
+    @Published var minimumZoomFactor: CGFloat = 1
+    @Published var maximumZoomFactor: CGFloat = 1
+    @Published var supportsFlash = false
+    @Published var supportsCameraSwitch = false
+    @Published var exposureBias: Float = 0
+    @Published var minimumExposureBias: Float = 0
+    @Published var maximumExposureBias: Float = 0
+    @Published var availableVideoOptions: [CameraVideoOption] = []
+    @Published var selectedVideoOption: CameraVideoOption?
     @Published var needsMicrophoneSettings = false
 
     var onPhoto: ((Data) -> Void)?
@@ -70,6 +92,7 @@ final class CameraController: NSObject, ObservableObject {
                         self.selectedLensID = device.uniqueID
                         self.zoomFactor = zoom
                     }
+                    self.publishCapabilities(for: device)
                 }
                 self.session.commitConfiguration()
             } catch { self.session.commitConfiguration() }
@@ -81,6 +104,57 @@ final class CameraController: NSObject, ObservableObject {
         let types: [AVCaptureDevice.DeviceType] = target == .front ? [.builtInWideAngleCamera] : [.builtInWideAngleCamera]
         let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: .video, position: target)
         if let device = discovery.devices.first { selectLens(device) }
+    }
+
+    func setZoom(_ value: CGFloat) {
+        guard let device = currentInput?.device else { return }
+        queue.async {
+            do {
+                try device.lockForConfiguration()
+                let zoom = min(max(device.minAvailableVideoZoomFactor, value), device.maxAvailableVideoZoomFactor)
+                device.videoZoomFactor = zoom
+                device.unlockForConfiguration()
+                DispatchQueue.main.async {
+                    self.preferredZoomFactor = zoom
+                    self.zoomFactor = zoom
+                }
+            } catch { }
+        }
+    }
+
+    func setExposureBias(_ value: Float) {
+        guard let device = currentInput?.device else { return }
+        queue.async {
+            do {
+                try device.lockForConfiguration()
+                let bias = min(max(device.minExposureTargetBias, value), device.maxExposureTargetBias)
+                device.setExposureTargetBias(bias, completionHandler: nil)
+                device.unlockForConfiguration()
+                DispatchQueue.main.async { self.exposureBias = bias }
+            } catch { }
+        }
+    }
+
+    func selectVideoOption(_ option: CameraVideoOption) {
+        guard let device = currentInput?.device else { return }
+        queue.async {
+            guard let format = device.formats.first(where: { format in
+                let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+                return dimensions.width == option.width && dimensions.height == option.height
+                    && format.videoSupportedFrameRateRanges.contains { range in
+                        range.minFrameRate <= Double(option.fps) && range.maxFrameRate >= Double(option.fps)
+                    }
+            }) else { return }
+            do {
+                try device.lockForConfiguration()
+                device.activeFormat = format
+                let duration = CMTime(value: 1, timescale: CMTimeScale(option.fps))
+                device.activeVideoMinFrameDuration = duration
+                device.activeVideoMaxFrameDuration = duration
+                device.unlockForConfiguration()
+                DispatchQueue.main.async { self.selectedVideoOption = option }
+            } catch { }
+        }
     }
 
     func focus(at devicePoint: CGPoint) {
@@ -106,7 +180,7 @@ final class CameraController: NSObject, ObservableObject {
         queue.async {
             do {
                 try device.lockForConfiguration()
-                let zoom = min(max(1, device.videoZoomFactor * factor), device.activeFormat.videoMaxZoomFactor)
+                let zoom = min(max(device.minAvailableVideoZoomFactor, device.videoZoomFactor * factor), device.maxAvailableVideoZoomFactor)
                 device.videoZoomFactor = zoom
                 device.unlockForConfiguration()
                 DispatchQueue.main.async {
@@ -135,7 +209,7 @@ final class CameraController: NSObject, ObservableObject {
             let lenses = devices.filter { $0.position == device.position }
 
             self.session.beginConfiguration()
-            self.session.sessionPreset = .high
+            self.session.sessionPreset = .inputPriority
             if self.session.canAddInput(input) { self.session.addInput(input); self.currentInput = input }
             if self.session.canAddOutput(self.photoOutput) { self.session.addOutput(self.photoOutput) }
             if self.session.canAddOutput(self.movieOutput) { self.session.addOutput(self.movieOutput) }
@@ -152,6 +226,7 @@ final class CameraController: NSObject, ObservableObject {
                 self.zoomFactor = zoom
                 self.isConfigured = true
             }
+            self.publishCapabilities(for: device, lenses: lenses)
         }
     }
 
@@ -164,6 +239,7 @@ final class CameraController: NSObject, ObservableObject {
     private func toggleRecording() {
         if movieOutput.isRecording {
             movieOutput.stopRecording()
+            setTorch(false)
             timer?.invalidate()
             timer = nil
             isRecording = false
@@ -210,11 +286,73 @@ final class CameraController: NSObject, ObservableObject {
     }
 
     private func startRecording() {
+        setTorch(flashMode == .on)
         let url = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).mov")
         movieOutput.startRecording(to: url, recordingDelegate: self)
         isRecording = true
         recordingDuration = 0
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.recordingDuration += 1 }
+    }
+
+    private func setTorch(_ enabled: Bool) {
+        guard let device = currentInput?.device, device.hasTorch else { return }
+        queue.async {
+            do {
+                try device.lockForConfiguration()
+                device.torchMode = enabled ? .on : .off
+                device.unlockForConfiguration()
+            } catch { }
+        }
+    }
+
+    private func publishCapabilities(for device: AVCaptureDevice, lenses: [AVCaptureDevice]? = nil) {
+        let discoveredLenses = lenses ?? AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInUltraWideCamera, .builtInWideAngleCamera, .builtInTelephotoCamera],
+            mediaType: .video,
+            position: device.position
+        ).devices
+        let options = videoOptions(for: device)
+        let currentDimensions = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
+        let durationSeconds = device.activeVideoMinFrameDuration.seconds
+        let currentFPS = durationSeconds.isFinite && durationSeconds > 0 ? Int((1 / durationSeconds).rounded()) : 0
+        DispatchQueue.main.async {
+            self.availableLenses = discoveredLenses
+            self.supportsFlash = device.hasFlash || device.hasTorch
+            let oppositePosition: AVCaptureDevice.Position = device.position == .front ? .back : .front
+            self.supportsCameraSwitch = !AVCaptureDevice.DiscoverySession(
+                deviceTypes: [.builtInWideAngleCamera],
+                mediaType: .video,
+                position: oppositePosition
+            ).devices.isEmpty
+            self.minimumZoomFactor = device.minAvailableVideoZoomFactor
+            self.maximumZoomFactor = min(device.maxAvailableVideoZoomFactor, 10)
+            self.exposureBias = device.exposureTargetBias
+            self.minimumExposureBias = device.minExposureTargetBias
+            self.maximumExposureBias = device.maxExposureTargetBias
+            self.availableVideoOptions = options
+            self.selectedVideoOption = options.first {
+                $0.width == currentDimensions.width && $0.height == currentDimensions.height && $0.fps == currentFPS
+            }
+        }
+    }
+
+    private func videoOptions(for device: AVCaptureDevice) -> [CameraVideoOption] {
+        var options = Set<CameraVideoOption>()
+        for format in device.formats {
+            let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            guard dimensions.width >= 1_280, dimensions.width <= 4_096 else { continue }
+            let aspect = Double(dimensions.width) / Double(dimensions.height)
+            guard abs(aspect - (16.0 / 9.0)) < 0.08 else { continue }
+            for fps in [24, 30, 60] where format.videoSupportedFrameRateRanges.contains(where: {
+                $0.minFrameRate <= Double(fps) && $0.maxFrameRate >= Double(fps)
+            }) {
+                options.insert(CameraVideoOption(width: dimensions.width, height: dimensions.height, fps: fps))
+            }
+        }
+        return options.sorted {
+            if $0.width == $1.width { return $0.fps < $1.fps }
+            return $0.width < $1.width
+        }
     }
 }
 

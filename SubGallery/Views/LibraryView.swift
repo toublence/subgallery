@@ -43,6 +43,9 @@ struct LibraryView: View {
     @AppStorage("storage.defaultRetention") private var defaultRetentionRaw = RetentionPolicy.forever.rawValue
     @AppStorage("storage.defaultRetentionDate") private var defaultRetentionDate = 0.0
     @AppStorage("camera.destinationAlbumID") private var cameraDestinationAlbumID = ""
+    @AppStorage("defaults.cameraDestination") private var defaultCameraDestination = StorageDestination.camera.token
+    @AppStorage("defaults.importDestination") private var defaultImportDestination = StorageDestination.all.token
+    @AppStorage("defaults.shareDestination") private var defaultShareDestination = StorageDestination.temporary.token
 
     @State private var newAlbumName = ""
     @State private var showsNewAlbum = false
@@ -224,7 +227,10 @@ struct LibraryView: View {
 
             Divider().frame(height: 24)
 
-            Button { isCameraPresented = true } label: {
+            Button {
+                cameraDestinationAlbumID = defaultCameraDestination
+                isCameraPresented = true
+            } label: {
                 Label("카메라", systemImage: "camera.fill")
                     .fontWeight(.semibold)
                     .padding(.horizontal, 16).padding(.vertical, 12)
@@ -338,7 +344,13 @@ struct LibraryView: View {
     private func deleteSelectedAlbum() {
         guard let album = albumPendingDeletion else { return }
         media.filter { $0.albumID == album.id }.forEach { $0.albumID = nil }
-        if cameraDestinationAlbumID == album.id.uuidString { cameraDestinationAlbumID = "" }
+        let albumToken = StorageDestination.album(album.id).token
+        if StorageDestination(token: cameraDestinationAlbumID) == .album(album.id) {
+            cameraDestinationAlbumID = StorageDestination.camera.token
+        }
+        if defaultCameraDestination == albumToken { defaultCameraDestination = StorageDestination.camera.token }
+        if defaultImportDestination == albumToken { defaultImportDestination = StorageDestination.all.token }
+        if defaultShareDestination == albumToken { defaultShareDestination = StorageDestination.temporary.token }
         modelContext.delete(album)
         try? modelContext.save()
         albumPendingDeletion = nil
@@ -375,14 +387,25 @@ struct LibraryView: View {
 
     @MainActor
     private func insert(_ stored: StoredMedia, source: MediaSource, album: Album? = nil) {
+        let importDestination = StorageDestination(token: defaultImportDestination)
+        let defaultAlbum: Album? = {
+            guard album == nil, case .album(let id) = importDestination else { return nil }
+            return albums.first { $0.id == id }
+        }()
+        let targetAlbum = album ?? defaultAlbum
+        let usesTemporaryDefault = album == nil && importDestination == .temporary
         let item = MediaItem(
             kind: stored.kind, source: source, localPath: stored.relativePath,
-            thumbnailPath: stored.thumbnailRelativePath, fileName: stored.fileName, fileSize: stored.fileSize,
+            thumbnailPath: stored.thumbnailRelativePath, fileName: stored.fileName,
+            createdAt: stored.capturedAt ?? .now, fileSize: stored.fileSize,
             width: stored.width, height: stored.height, duration: stored.duration
         )
-        item.albumID = album?.id
-        let policy = album?.defaultRetention ?? RetentionPolicy(rawValue: defaultRetentionRaw) ?? .forever
-        let customDate = album?.defaultRetentionDate
+        item.latitude = stored.latitude
+        item.longitude = stored.longitude
+        item.albumID = targetAlbum?.id
+        let policy = targetAlbum?.defaultRetention
+            ?? (usesTemporaryDefault ? .sevenDays : RetentionPolicy(rawValue: defaultRetentionRaw) ?? .forever)
+        let customDate = targetAlbum?.defaultRetentionDate
             ?? (defaultRetentionDate > 0 ? Date(timeIntervalSince1970: defaultRetentionDate) : nil)
         RetentionService.apply(policy, customDate: customDate, to: item)
         modelContext.insert(item)

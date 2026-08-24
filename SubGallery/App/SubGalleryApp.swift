@@ -46,9 +46,16 @@ struct SubGalleryApp: App {
     @State private var obscuresContent = false
     @State private var isUnlocked = false
     @State private var deepLink: MediaDeepLink?
+    @State private var requestedLibraryDestination: AlbumDestination?
+    @State private var didApplyInitialStartScreen = false
+    @State private var biometricErrorMessage: String?
     @AppStorage("privacy.biometricLock") private var biometricLock = false
     @AppStorage("privacy.appSwitcherProtection") private var appSwitcherProtection = true
     @AppStorage("app.language") private var appLanguageRaw = AppLanguage.system.rawValue
+    @AppStorage("app.startScreen") private var startScreenRaw = AppStartScreen.library.rawValue
+    @AppStorage("app.lastScreen") private var lastScreenRaw = AppStartScreen.library.rawValue
+    @AppStorage("defaults.cameraDestination") private var defaultCameraDestination = StorageDestination.camera.token
+    @AppStorage("camera.destinationAlbumID") private var currentCameraDestination = StorageDestination.camera.token
 
     private let dataStore = DataStoreBootstrap.make()
 
@@ -58,24 +65,41 @@ struct SubGalleryApp: App {
                 if let errorMessage = dataStore.errorMessage {
                     DataStoreErrorView(message: errorMessage)
                 } else {
-                    LibraryView(isCameraPresented: $isCameraPresented)
+                    LibraryView(
+                        isCameraPresented: $isCameraPresented,
+                        requestedDestination: $requestedLibraryDestination
+                    )
                         .blur(radius: obscuresContent ? 28 : 0)
                         .allowsHitTesting(!obscuresContent)
                 }
 
                 if biometricLock && !isUnlocked {
-                    LockView(unlock: authenticate)
+                    LockView(unlock: authenticate, errorMessage: biometricErrorMessage)
                 }
             }
             .environment(\.locale, (AppLanguage(rawValue: appLanguageRaw) ?? .system).locale)
             .fullScreenCover(isPresented: $isCameraPresented) {
-                CameraView()
+                CameraView { destination in
+                    requestedLibraryDestination = destination
+                    isCameraPresented = false
+                }
+                .overlay {
+                    if biometricLock && !isUnlocked {
+                        LockView(unlock: authenticate, errorMessage: biometricErrorMessage)
+                    }
+                }
             }
             .fullScreenCover(item: $deepLink) { target in
                 ReminderDestinationView(mediaID: target.id)
+                    .overlay {
+                        if biometricLock && !isUnlocked {
+                            LockView(unlock: authenticate, errorMessage: biometricErrorMessage)
+                        }
+                    }
             }
             .onOpenURL { url in
                 if url.host == "capture" {
+                    currentCameraDestination = defaultCameraDestination
                     isCameraPresented = true
                 } else if url.host == "media",
                           let id = UUID(uuidString: url.pathComponents.last ?? "") {
@@ -97,7 +121,16 @@ struct SubGalleryApp: App {
                     resumePendingOCR()
                 }
                 openPendingReminderIfNeeded()
-                if biometricLock { authenticate() } else { isUnlocked = true }
+                if biometricLock {
+                    authenticate()
+                } else {
+                    isUnlocked = true
+                    applyInitialStartScreenIfNeeded()
+                }
+            }
+            .onChange(of: isCameraPresented) { _, isPresented in
+                guard didApplyInitialStartScreen else { return }
+                lastScreenRaw = isPresented ? AppStartScreen.camera.rawValue : AppStartScreen.library.rawValue
             }
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
@@ -119,16 +152,40 @@ struct SubGalleryApp: App {
     }
 
     private func authenticate() {
-        guard biometricLock else { isUnlocked = true; return }
+        guard biometricLock else {
+            biometricErrorMessage = nil
+            isUnlocked = true
+            return
+        }
         let context = LAContext()
+        context.localizedCancelTitle = L10n.text("취소")
         var error: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else { return }
-        context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "보관함 잠금 해제") { success, _ in
+        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error),
+              context.biometryType == .touchID else {
+            biometricLock = false
+            biometricErrorMessage = nil
+            isUnlocked = true
+            return
+        }
+        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: "Touch ID로 보관함 잠금 해제") { success, _ in
             DispatchQueue.main.async {
                 isUnlocked = success
-                if success { openPendingReminderIfNeeded() }
+                biometricErrorMessage = success ? nil : "인증하지 않으면 비공개 보관함을 열 수 없습니다."
+                if success {
+                    openPendingReminderIfNeeded()
+                    applyInitialStartScreenIfNeeded()
+                }
             }
         }
+    }
+
+    private func applyInitialStartScreenIfNeeded() {
+        guard !didApplyInitialStartScreen else { return }
+        didApplyInitialStartScreen = true
+        let start = AppStartScreen(rawValue: startScreenRaw) ?? .library
+        let opensCamera = start == .camera || (start == .last && lastScreenRaw == AppStartScreen.camera.rawValue)
+        if opensCamera { currentCameraDestination = defaultCameraDestination }
+        isCameraPresented = opensCamera
     }
 
     @MainActor
@@ -303,19 +360,30 @@ private struct DataStoreErrorView: View {
 
 struct LockView: View {
     let unlock: () -> Void
+    var errorMessage: String?
 
     var body: some View {
         VStack(spacing: 20) {
-            Image(systemName: "lock.fill")
+            Image(systemName: "touchid")
                 .font(.system(size: 42, weight: .medium))
                 .foregroundStyle(.secondary)
             Text("SubGallery가 잠겨 있습니다")
                 .font(.title3.weight(.semibold))
-            Button("잠금 해제", action: unlock)
+            Text("사진과 동영상은 인증 전까지 표시되지 않습니다.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            Button("Touch ID로 잠금 해제", action: unlock)
                 .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.background)
+        .privacySensitive()
     }
 }
 

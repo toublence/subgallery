@@ -10,6 +10,49 @@ private struct TemporaryGroup: Identifiable {
     var id: String { title }
 }
 
+private enum AlbumGridMode: String, CaseIterable, Identifiable {
+    case small, standard, large, original
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .small: "작은 그리드"
+        case .standard: "기본 그리드"
+        case .large: "큰 그리드"
+        case .original: "원본 비율"
+        }
+    }
+}
+
+private enum AlbumSortMode: String, CaseIterable, Identifiable {
+    case newest, oldest, captured, imported, fileName
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .newest: "최신순"
+        case .oldest: "오래된순"
+        case .captured: "촬영일순"
+        case .imported: "가져온 날짜순"
+        case .fileName: "파일 이름순"
+        }
+    }
+}
+
+private enum AlbumFilterMode: String, CaseIterable, Identifiable {
+    case all, photo, video, pinned, temporary, waiting, dueToday
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .all: "전체"
+        case .photo: "사진"
+        case .video: "동영상"
+        case .pinned: "고정"
+        case .temporary: "임시 보관"
+        case .waiting: "완료 대기"
+        case .dueToday: "오늘 정리 예정"
+        }
+    }
+}
+
 struct AlbumView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \MediaItem.createdAt, order: .reverse) private var allMedia: [MediaItem]
@@ -25,12 +68,47 @@ struct AlbumView: View {
     @State private var showsRetentionSheet = false
     @State private var showsShareSheet = false
     @State private var showsFilesExporter = false
+    @State private var showsSlideshow = false
     @State private var deleteConfirmation = false
     @State private var photosSelection: [PhotosPickerItem] = []
     @State private var importError: String?
     @State private var bulkMessage: String?
+    @State private var gridMode: AlbumGridMode
+    @State private var sortMode: AlbumSortMode
+    @State private var filterMode: AlbumFilterMode
 
-    private let columns = [GridItem(.adaptive(minimum: 94, maximum: 180), spacing: 4)]
+    init(destination: AlbumDestination, isCameraPresented: Binding<Bool>) {
+        self.destination = destination
+        _isCameraPresented = isCameraPresented
+        let key = destination.preferencesKey
+        _gridMode = State(initialValue: AlbumGridMode(
+            rawValue: UserDefaults.standard.string(forKey: "album.view.\(key)") ?? ""
+        ) ?? .standard)
+        _sortMode = State(initialValue: AlbumSortMode(
+            rawValue: UserDefaults.standard.string(forKey: "album.sort.\(key)") ?? ""
+        ) ?? .newest)
+        _filterMode = State(initialValue: AlbumFilterMode(
+            rawValue: UserDefaults.standard.string(forKey: "album.filter.\(key)") ?? ""
+        ) ?? .all)
+    }
+
+    private var columns: [GridItem] {
+        switch gridMode {
+        case .small: [GridItem(.adaptive(minimum: 68, maximum: 104), spacing: 2)]
+        case .standard: [GridItem(.adaptive(minimum: 94, maximum: 180), spacing: 4)]
+        case .large: [GridItem(.adaptive(minimum: 160, maximum: 360), spacing: 8)]
+        case .original: [GridItem(.adaptive(minimum: 150, maximum: 320), spacing: 6)]
+        }
+    }
+
+    private var gridSpacing: CGFloat {
+        switch gridMode {
+        case .small: 2
+        case .standard: 4
+        case .large: 8
+        case .original: 6
+        }
+    }
 
     private var title: String {
         switch destination {
@@ -44,7 +122,7 @@ struct AlbumView: View {
         return albums.first { $0.id == id }
     }
 
-    private var items: [MediaItem] {
+    private var baseItems: [MediaItem] {
         switch destination {
         case .smart(.all): allMedia.filter { $0.deletedAt == nil }
         case .smart(.camera): allMedia.filter { $0.deletedAt == nil && $0.source == .camera }
@@ -53,6 +131,11 @@ struct AlbumView: View {
         case .smart(.recentlyDeleted): allMedia.filter { $0.deletedAt != nil }
         case .user(let id, _): allMedia.filter { $0.deletedAt == nil && $0.albumID == id }
         }
+    }
+
+    private var items: [MediaItem] {
+        let filtered = baseItems.filter(matchesFilter)
+        return filtered.sorted(by: isOrderedBefore)
     }
 
     private var isRecentlyDeleted: Bool {
@@ -67,7 +150,7 @@ struct AlbumView: View {
     var body: some View {
         ScrollView {
             if case .smart(.temporary) = destination { temporarySummary }
-            LazyVGrid(columns: columns, spacing: 4) {
+            LazyVGrid(columns: columns, spacing: gridSpacing) {
                 if case .smart(.temporary) = destination {
                     ForEach(temporaryGroups) { group in
                         Section {
@@ -110,9 +193,10 @@ struct AlbumView: View {
                     }
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if !isSelecting { displayOptionsMenu }
                 Button(L10n.text(isSelecting ? "완료" : "선택")) {
-                    withAnimation { isSelecting.toggle(); selection.removeAll() }
+                    setSelecting(!isSelecting)
                 }
                 .disabled(items.isEmpty)
             }
@@ -126,10 +210,10 @@ struct AlbumView: View {
                     } else {
                         Menu {
                             Button { saveSelectedToPhotos() } label: {
-                                Label("Photos에 저장", systemImage: "photo.badge.arrow.down")
+                                Label("사진 앱에 저장", systemImage: "photo.badge.arrow.down")
                             }
                             Button { showsFilesExporter = true } label: {
-                                Label("Files로 내보내기", systemImage: "folder")
+                                Label("파일 앱으로 내보내기", systemImage: "folder")
                             }
                             Button { showsShareSheet = true } label: {
                                 Label("공유", systemImage: "square.and.arrow.up")
@@ -142,9 +226,14 @@ struct AlbumView: View {
                             Button { showsRetentionSheet = true } label: {
                                 Label("보관 기간 변경", systemImage: "clock")
                             }
-                            Button { pinSelected() } label: {
-                                Label("고정", systemImage: "pin")
+                            Button { togglePinnedSelected() } label: {
+                                let removesPins = selectedItems.allSatisfy(\.isPinned)
+                                Label(removesPins ? "고정 해제" : "고정", systemImage: removesPins ? "pin.slash" : "pin")
                             }
+                            Button { completeSelected() } label: {
+                                Label("완료 처리", systemImage: "checkmark.circle")
+                            }
+                            .disabled(!selectedItems.contains(where: \.waitingForCompletion))
                             Divider()
                             Button(role: .destructive) { deleteConfirmation = true } label: {
                                 Label("삭제", systemImage: "trash")
@@ -159,6 +248,9 @@ struct AlbumView: View {
         }
         .fullScreenCover(item: $viewerItem) { item in
             MediaViewer(items: items, initialID: item.id, isRecentlyDeleted: isRecentlyDeleted)
+        }
+        .fullScreenCover(isPresented: $showsSlideshow) {
+            SlideshowView(items: items)
         }
         .sheet(isPresented: $showsMoveSheet) { albumPicker }
         .sheet(isPresented: $showsRetentionSheet) {
@@ -197,12 +289,62 @@ struct AlbumView: View {
     }
 
     private func mediaCell(_ item: MediaItem) -> some View {
-        MediaGridCell(item: item, isSelected: selection.contains(item.id))
-            .onTapGesture {
-                if isSelecting { toggle(item.id) } else { viewerItem = item }
-            }
+        Button {
+            if isSelecting { toggle(item.id) } else { viewerItem = item }
+        } label: {
+            MediaGridCell(
+                item: item,
+                isSelected: selection.contains(item.id),
+                usesOriginalAspect: gridMode == .original,
+                showsSelectionControl: isSelecting
+            )
+        }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
             .contextMenu { contextMenu(for: item) }
             .accessibilityAddTraits(selection.contains(item.id) ? .isSelected : [])
+    }
+
+    private var displayOptionsMenu: some View {
+        Menu {
+            Menu("보기") {
+                ForEach(AlbumGridMode.allCases) { mode in
+                    Button { setGridMode(mode) } label: {
+                        Label(mode.title, systemImage: gridMode == mode ? "checkmark" : "square.grid.2x2")
+                    }
+                }
+            }
+            Menu("정렬") {
+                ForEach(AlbumSortMode.allCases) { mode in
+                    Button { setSortMode(mode) } label: {
+                        Label(mode.title, systemImage: sortMode == mode ? "checkmark" : "arrow.up.arrow.down")
+                    }
+                }
+            }
+            Menu("필터") {
+                ForEach(AlbumFilterMode.allCases) { mode in
+                    Button { setFilterMode(mode) } label: {
+                        Label(mode.title, systemImage: filterMode == mode ? "checkmark" : "line.3.horizontal.decrease")
+                    }
+                }
+            }
+            Divider()
+            Button { showsSlideshow = true } label: {
+                Label("슬라이드쇼", systemImage: "play.rectangle")
+            }
+            .disabled(items.isEmpty)
+            if let album = userAlbum {
+                NavigationLink {
+                    MediaMapView(albumID: album.id, albumName: album.name)
+                } label: {
+                    Label("지도", systemImage: "map")
+                }
+                .disabled(baseItems.isEmpty)
+            }
+            Button { setSelecting(true) } label: { Label("선택", systemImage: "checkmark.circle") }
+        } label: {
+            Label("보기 옵션", systemImage: "ellipsis.circle")
+        }
     }
 
     private func albumCaptureControls(_ album: Album) -> some View {
@@ -215,7 +357,7 @@ struct AlbumView: View {
             Divider().frame(height: 24)
 
             Button {
-                cameraDestinationAlbumID = album.id.uuidString
+                cameraDestinationAlbumID = StorageDestination.album(album.id).token
                 isCameraPresented = true
             } label: {
                 Label("카메라", systemImage: "camera.fill")
@@ -307,6 +449,53 @@ struct AlbumView: View {
         if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
     }
 
+    private func setSelecting(_ selecting: Bool) {
+        withAnimation {
+            isSelecting = selecting
+            selection.removeAll()
+        }
+    }
+
+    private func setGridMode(_ mode: AlbumGridMode) {
+        gridMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: "album.view.\(destination.preferencesKey)")
+    }
+
+    private func setSortMode(_ mode: AlbumSortMode) {
+        sortMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: "album.sort.\(destination.preferencesKey)")
+    }
+
+    private func setFilterMode(_ mode: AlbumFilterMode) {
+        filterMode = mode
+        selection.removeAll()
+        UserDefaults.standard.set(mode.rawValue, forKey: "album.filter.\(destination.preferencesKey)")
+    }
+
+    private func matchesFilter(_ item: MediaItem) -> Bool {
+        switch filterMode {
+        case .all: true
+        case .photo: item.kind == .photo
+        case .video: item.kind == .video
+        case .pinned: item.isPinned
+        case .temporary: item.expirationDate != nil || item.waitingForCompletion
+        case .waiting: item.waitingForCompletion
+        case .dueToday:
+            !item.waitingForCompletion && (item.expirationDate ?? .distantFuture) <= Calendar.current.endOfToday
+        }
+    }
+
+    private func isOrderedBefore(_ lhs: MediaItem, _ rhs: MediaItem) -> Bool {
+        switch sortMode {
+        case .newest: max(lhs.createdAt, lhs.importedAt) > max(rhs.createdAt, rhs.importedAt)
+        case .oldest: min(lhs.createdAt, lhs.importedAt) < min(rhs.createdAt, rhs.importedAt)
+        case .captured: lhs.createdAt > rhs.createdAt
+        case .imported: lhs.importedAt > rhs.importedAt
+        case .fileName:
+            lhs.fileName.localizedStandardCompare(rhs.fileName) == .orderedAscending
+        }
+    }
+
     private func togglePin(_ item: MediaItem) {
         item.isPinned.toggle()
         if !item.isPinned && RetentionService.shouldMoveToRecentlyDeleted(item) {
@@ -320,11 +509,32 @@ struct AlbumView: View {
         selection.removeAll()
     }
 
-    private func pinSelected() {
-        selectedItems.forEach { $0.isPinned = true }
-        try? modelContext.save()
-        selection.removeAll()
-        isSelecting = false
+    private func togglePinnedSelected() {
+        let changing = selectedItems
+        let shouldPin = !changing.allSatisfy(\.isPinned)
+        changing.forEach { $0.isPinned = shouldPin }
+        Task {
+            if !shouldPin {
+                for item in changing where RetentionService.shouldMoveToRecentlyDeleted(item) {
+                    await MediaLifecycleService.moveToRecentlyDeleted(item)
+                }
+            }
+            try? modelContext.save()
+            selection.removeAll()
+            isSelecting = false
+        }
+    }
+
+    private func completeSelected() {
+        let completing = selectedItems.filter(\.waitingForCompletion)
+        Task {
+            for item in completing {
+                await MediaLifecycleService.complete(item)
+            }
+            try? modelContext.save()
+            selection.removeAll()
+            isSelecting = false
+        }
     }
 
     private func saveSelectedToPhotos() {
@@ -378,8 +588,11 @@ struct AlbumView: View {
         let item = MediaItem(
             kind: stored.kind, source: .photos, localPath: stored.relativePath,
             thumbnailPath: stored.thumbnailRelativePath, fileName: stored.fileName,
-            fileSize: stored.fileSize, width: stored.width, height: stored.height, duration: stored.duration
+            createdAt: stored.capturedAt ?? .now, fileSize: stored.fileSize,
+            width: stored.width, height: stored.height, duration: stored.duration
         )
+        item.latitude = stored.latitude
+        item.longitude = stored.longitude
         item.albumID = album.id
         RetentionService.apply(album.defaultRetention, customDate: album.defaultRetentionDate, to: item)
         modelContext.insert(item)
@@ -428,17 +641,56 @@ struct BatchRetentionPickerView: View {
 struct MediaGridCell: View {
     let item: MediaItem
     let isSelected: Bool
+    var usesOriginalAspect = false
+    var showsSelectionControl = false
 
     var body: some View {
         Rectangle()
             .fill(.quaternary)
-            .aspectRatio(1, contentMode: .fit)
+            .aspectRatio(cellAspectRatio, contentMode: .fit)
             .overlay { cellContent }
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                if showsSelectionControl && isSelected {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(.blue.opacity(0.16))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(.blue, lineWidth: 3)
+                        }
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if showsSelectionControl {
+                    selectionBadge.padding(7)
+                }
+            }
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(item.fileName.isEmpty ? L10n.text("사진") : item.fileName)
             .accessibilityValue(item.waitingForCompletion || item.expirationDate != nil ? RetentionService.statusText(for: item) : "")
+    }
+
+    private var cellAspectRatio: CGFloat {
+        guard usesOriginalAspect, item.width > 0, item.height > 0 else { return 1 }
+        return min(max(CGFloat(item.width) / CGFloat(item.height), 0.45), 2.2)
+    }
+
+    private var selectionBadge: some View {
+        ZStack {
+            Circle()
+                .fill(isSelected ? Color.blue : Color.black.opacity(0.62))
+            Circle()
+                .stroke(.white, lineWidth: 2.5)
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .font(.caption.bold())
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: 28, height: 28)
+        .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+        .accessibilityLabel(isSelected ? "선택됨" : "선택 안 됨")
     }
 
     private var cellContent: some View {
@@ -457,20 +709,31 @@ struct MediaGridCell: View {
                     .padding(5).background(.black.opacity(0.45), in: Capsule()).padding(4)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            if item.isPinned {
+            if item.isPinned && !showsSelectionControl {
                 Image(systemName: "pin.fill")
                     .font(.caption.weight(.semibold)).foregroundStyle(.white)
                     .padding(6).background(.black.opacity(0.4), in: Circle()).padding(4)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            }
-            if isSelected {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.title2).symbolRenderingMode(.palette).foregroundStyle(.white, .blue).padding(6)
             }
         }
     }
 
     private var duration: String {
         Duration.seconds(item.duration).formatted(.time(pattern: .minuteSecond))
+    }
+}
+
+private extension AlbumDestination {
+    var preferencesKey: String {
+        switch self {
+        case .smart(let smart): "smart.\(smart.rawValue)"
+        case .user(let id, _): "user.\(id.uuidString)"
+        }
+    }
+}
+
+private extension Calendar {
+    var endOfToday: Date {
+        date(bySettingHour: 23, minute: 59, second: 59, of: .now) ?? .now
     }
 }

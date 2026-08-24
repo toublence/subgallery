@@ -28,6 +28,35 @@ enum AppStartScreen: String, CaseIterable, Identifiable {
     }
 }
 
+enum StorageDestination: Equatable {
+    case camera
+    case all
+    case temporary
+    case album(UUID)
+
+    init(token: String) {
+        if token == "camera" || token.isEmpty {
+            self = .camera
+        } else if token == "all" {
+            self = .all
+        } else if token == "temporary" {
+            self = .temporary
+        } else {
+            let rawID = token.hasPrefix("album:") ? String(token.dropFirst("album:".count)) : token
+            self = UUID(uuidString: rawID).map(Self.album) ?? .all
+        }
+    }
+
+    var token: String {
+        switch self {
+        case .camera: "camera"
+        case .all: "all"
+        case .temporary: "temporary"
+        case .album(let id): "album:\(id.uuidString)"
+        }
+    }
+}
+
 enum RetentionPolicy: String, Codable, CaseIterable, Identifiable {
     case forever
     case today

@@ -50,7 +50,7 @@ struct PremiumView: View {
 
                     VStack(alignment: .leading, spacing: 14) {
                         FeatureRow("Temporary 자동 정리", symbol: "clock.arrow.circlepath")
-                        FeatureRow("Face ID와 Fake PIN", symbol: "faceid")
+                        FeatureRow("Touch ID와 Fake PIN", symbol: "touchid")
                         FeatureRow("iCloud 동기화", symbol: "icloud")
                         FeatureRow("Capture Preset과 빠른 촬영", symbol: "camera.badge.clock")
                         FeatureRow("개인정보 보호 내보내기", symbol: "hand.raised")

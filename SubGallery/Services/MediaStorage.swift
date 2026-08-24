@@ -14,6 +14,15 @@ struct StoredMedia: Sendable {
     let width: Int
     let height: Int
     let duration: Double
+    let capturedAt: Date?
+    let latitude: Double?
+    let longitude: Double?
+}
+
+struct StoredMediaMetadata: Sendable {
+    let capturedAt: Date?
+    let latitude: Double?
+    let longitude: Double?
 }
 
 actor MediaStorage {
@@ -74,6 +83,16 @@ actor MediaStorage {
         }
     }
 
+    func metadata(for relativePath: String) -> StoredMediaMetadata {
+        let url = Self.url(for: relativePath)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+            return StoredMediaMetadata(capturedAt: nil, latitude: nil, longitude: nil)
+        }
+        let values = imageLocationMetadata(from: properties)
+        return StoredMediaMetadata(capturedAt: values.0, latitude: values.1, longitude: values.2)
+    }
+
     private func prepareDirectories() throws {
         try fileManager.createDirectory(at: Self.rootURL.appending(path: "Media"), withIntermediateDirectories: true)
         try fileManager.createDirectory(at: Self.rootURL.appending(path: "Thumbnails"), withIntermediateDirectories: true)
@@ -92,11 +111,15 @@ actor MediaStorage {
         var height = 0
         var duration = 0.0
         var thumbnail: CGImage?
+        var capturedAt: Date?
+        var latitude: Double?
+        var longitude: Double?
 
         if kind == .photo, let source = CGImageSourceCreateWithURL(url as CFURL, nil) {
             if let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
                 width = properties[kCGImagePropertyPixelWidth] as? Int ?? 0
                 height = properties[kCGImagePropertyPixelHeight] as? Int ?? 0
+                (capturedAt, latitude, longitude) = imageLocationMetadata(from: properties)
             }
             let options: [CFString: Any] = [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -132,7 +155,46 @@ actor MediaStorage {
             fileSize: size,
             width: width,
             height: height,
-            duration: duration
+            duration: duration,
+            capturedAt: capturedAt,
+            latitude: latitude,
+            longitude: longitude
         )
+    }
+
+    private func imageLocationMetadata(
+        from properties: [CFString: Any]
+    ) -> (Date?, Double?, Double?) {
+        let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any]
+        let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+        let dateString = exif?[kCGImagePropertyExifDateTimeOriginal] as? String
+            ?? tiff?[kCGImagePropertyTIFFDateTime] as? String
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        let capturedAt = dateString.flatMap(formatter.date(from:))
+
+        guard let gps = properties[kCGImagePropertyGPSDictionary] as? [CFString: Any],
+              var latitude = metadataNumber(gps[kCGImagePropertyGPSLatitude]),
+              var longitude = metadataNumber(gps[kCGImagePropertyGPSLongitude]) else {
+            return (capturedAt, nil, nil)
+        }
+        if (gps[kCGImagePropertyGPSLatitudeRef] as? String)?.uppercased() == "S" {
+            latitude *= -1
+        }
+        if (gps[kCGImagePropertyGPSLongitudeRef] as? String)?.uppercased() == "W" {
+            longitude *= -1
+        }
+        guard (-90...90).contains(latitude), (-180...180).contains(longitude) else {
+            return (capturedAt, nil, nil)
+        }
+        return (capturedAt, latitude, longitude)
+    }
+
+    private func metadataNumber(_ value: Any?) -> Double? {
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let text = value as? String { return Double(text) }
+        return nil
     }
 }

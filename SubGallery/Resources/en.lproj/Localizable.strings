@@ -83,7 +83,7 @@
 "이번 주 %d개 정리 예정" = "%d scheduled for cleanup this week";
 "이번 주 정리 예정 %d개" = "%d scheduled for cleanup this week";
 "개인정보 보호" = "Privacy";
-"Face ID로 잠금" = "Lock with Face ID";
+"Touch ID로 잠금" = "Lock with Touch ID";
 "앱 전환기에서 가리기" = "Hide in App Switcher";
 "내보낼 때 위치 정보 제거" = "Remove Location When Exporting";
 "위치 정보 저장" = "Save Location";
