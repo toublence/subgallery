@@ -8,12 +8,14 @@ enum MediaExportError: LocalizedError {
     case photosAccessDenied
     case noItems
     case exportFailed
+    case premiumRequired
 
     var errorDescription: String? {
         switch self {
         case .photosAccessDenied: L10n.text("사진 앱에 추가할 권한이 필요합니다.")
         case .noItems: L10n.text("내보낼 항목이 없습니다.")
         case .exportFailed: L10n.text("메타데이터를 제거한 파일을 만들 수 없습니다.")
+        case .premiumRequired: L10n.text("개인정보 보호 내보내기는 Premium 기능입니다.")
         }
     }
 }
@@ -67,6 +69,7 @@ enum MediaExportService {
     }
 
     static func metadataFreeCopy(of item: MediaItem) async throws -> StoredMedia {
+        guard PremiumAccess.isActive else { throw MediaExportError.premiumRequired }
         let urls = try await preparedURLs(for: [item], strippingMetadata: true)
         defer { cleanupPreparedURLs(urls) }
         guard let url = urls.first else { throw MediaExportError.exportFailed }

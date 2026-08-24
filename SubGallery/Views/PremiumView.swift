@@ -215,7 +215,7 @@ struct PremiumView: View {
                 .font(.title.bold())
                 .multilineTextAlignment(.center)
 
-            Text(L10n.text("자동 정리, iCloud 동기화, 고급 관리 기능으로 SubGallery를 더 편하게 사용하세요."))
+            Text(L10n.text("자동 분류, 정리 센터, OCR 스마트 작업으로 쌓인 사진을 더 편하게 관리하세요."))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -226,24 +226,43 @@ struct PremiumView: View {
     private var benefits: some View {
         VStack(spacing: 0) {
             PremiumBenefitRow(
-                symbol: "clock.arrow.circlepath",
-                title: "자동 정리",
-                detail: "오늘, 7일, 30일, 완료할 때까지 필요한 기간이 지나면 자동으로 정리"
+                symbol: "wand.and.stars",
+                title: "자동으로 분류",
+                detail: "영수증, 문서, 임시 사진의 앨범과 보관 기간을 추천합니다."
             )
             Divider().padding(.leading, 52)
             PremiumBenefitRow(
-                symbol: "icloud.fill",
-                title: "iCloud 동기화",
-                detail: "iPhone과 iPad에서 내 보관함을 그대로 사용"
+                symbol: "tray.full.fill",
+                title: "정리할 사진만 모아서",
+                detail: "만료 예정, 완료 대기 사진을 한곳에서 빠르게 정리합니다."
             )
             Divider().padding(.leading, 52)
             PremiumBenefitRow(
-                symbol: "slider.horizontal.3",
-                title: "고급 관리",
-                detail: "촬영 프리셋, 메타데이터 제거, 고급 내보내기와 관리 기능"
+                symbol: "text.viewfinder",
+                title: "사진 속 정보를 바로 사용",
+                detail: "금액, 날짜, 주소, QR 등을 인식해 바로 필요한 작업을 실행합니다."
             )
+            Divider().padding(.leading, 52)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    supportingBenefit("icloud", "iCloud Sync")
+                    supportingBenefit("camera.filters", "Capture Preset")
+                    supportingBenefit("shield.lefthalf.filled", "개인정보 보호 내보내기")
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+            }
         }
         .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func supportingBenefit(_ symbol: String, _ title: String) -> some View {
+        Label(L10n.text(title), systemImage: symbol)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Color.secondary.opacity(0.1), in: Capsule())
     }
 
     @ViewBuilder
@@ -540,8 +559,15 @@ private struct PlanComparisonView: View {
         ("사진 앱과 별도 보관", true, true),
         ("촬영 및 가져오기", true, true),
         ("앨범과 보관 기간", true, true),
-        ("iCloud 동기화", false, true),
         ("PIN 잠금", true, true),
+        ("OCR 텍스트 검색", true, true),
+        ("일반 내보내기", true, true),
+        ("스마트 자동 분류", false, true),
+        ("앨범 자동 규칙", false, true),
+        ("정리 센터", false, true),
+        ("OCR 스마트 작업", false, true),
+        ("영수증 정보 추출", false, true),
+        ("iCloud 동기화", false, true),
         ("촬영 프리셋 설정", false, true),
         ("개인정보 보호 내보내기", false, true)
     ]

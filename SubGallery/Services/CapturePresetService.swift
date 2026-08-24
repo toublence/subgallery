@@ -6,64 +6,94 @@ enum CapturePresetService {
         let albums = (try? context.fetch(FetchDescriptor<Album>())) ?? []
         let presets = (try? context.fetch(FetchDescriptor<CapturePreset>())) ?? []
 
-        let receipt = ensureAlbum(
-            named: L10n.text("영수증"),
-            purpose: .receipt,
-            retention: .thirtyDays,
-            ocrEnabled: true,
-            savesLocation: false,
-            autoPins: false,
-            primaryAction: .shareAndComplete,
-            existing: albums,
-            context: context
-        )
-        let parking = ensureAlbum(
-            named: L10n.text("주차"),
-            purpose: .parking,
-            retention: .untilComplete,
-            ocrEnabled: false,
-            savesLocation: true,
-            autoPins: true,
-            primaryAction: .findCar,
-            existing: albums,
-            context: context
-        )
-        let document = ensureAlbum(
-            named: L10n.text("문서"),
-            purpose: .document,
-            retention: .untilComplete,
-            ocrEnabled: true,
-            savesLocation: false,
-            autoPins: false,
-            primaryAction: .automatic,
-            existing: albums,
-            context: context
-        )
-        _ = ensureAlbum(
-            named: L10n.text("여행"),
-            purpose: .travel,
-            retention: .forever,
-            ocrEnabled: true,
-            savesLocation: true,
-            autoPins: false,
-            primaryAction: .automatic,
-            existing: albums,
-            context: context
-        )
+        migrateUnusedLegacyTemplates(albums: albums, presets: presets, in: context)
 
         ensurePreset(named: L10n.text("일반"), purpose: .general, album: nil, retention: .forever,
                      ocrEnabled: true, savesLocation: false, autoPins: false, primaryAction: .automatic,
                      sortOrder: 0, existing: presets, context: context)
-        ensurePreset(named: receipt.name, purpose: .receipt, album: receipt, retention: .thirtyDays,
-                     ocrEnabled: true, savesLocation: false, autoPins: false, primaryAction: .shareAndComplete,
-                     sortOrder: 1, existing: presets, context: context)
-        ensurePreset(named: parking.name, purpose: .parking, album: parking, retention: .untilComplete,
-                     ocrEnabled: false, savesLocation: true, autoPins: true, primaryAction: .findCar,
-                     sortOrder: 2, existing: presets, context: context)
-        ensurePreset(named: document.name, purpose: .document, album: document, retention: .untilComplete,
-                     ocrEnabled: true, savesLocation: false, autoPins: false, primaryAction: .automatic,
-                     sortOrder: 3, existing: presets, context: context)
         try? context.save()
+    }
+
+    static let templatePurposes: [CapturePurpose] = [.receipt, .parking, .document, .qr, .temporary]
+
+    @discardableResult
+    static func addTemplate(_ purpose: CapturePurpose, in context: ModelContext) -> Album {
+        let albums = (try? context.fetch(FetchDescriptor<Album>())) ?? []
+        if let existing = albums.first(where: { $0.purpose == purpose }) { return existing }
+
+        let configuration = templateConfiguration(for: purpose)
+        let album = Album(
+            name: purpose.title,
+            sortOrder: albums.count,
+            defaultRetention: configuration.retention
+        )
+        album.purpose = purpose
+        album.ocrEnabled = configuration.ocrEnabled
+        album.savesLocation = configuration.savesLocation
+        album.autoPins = configuration.autoPins
+        album.primaryAction = configuration.primaryAction
+        album.isBuiltIn = true
+        album.smartRuleEnabled = PremiumAccess.isActive
+        context.insert(album)
+
+        if PremiumAccess.isActive {
+            let presets = (try? context.fetch(FetchDescriptor<CapturePreset>())) ?? []
+            ensurePreset(
+                named: purpose.title,
+                purpose: purpose,
+                album: album,
+                retention: configuration.retention,
+                ocrEnabled: configuration.ocrEnabled,
+                savesLocation: configuration.savesLocation,
+                autoPins: configuration.autoPins,
+                primaryAction: configuration.primaryAction,
+                sortOrder: presets.count,
+                existing: presets,
+                context: context
+            )
+        }
+        try? context.save()
+        return album
+    }
+
+    private static func templateConfiguration(for purpose: CapturePurpose) -> (
+        retention: RetentionPolicy,
+        ocrEnabled: Bool,
+        savesLocation: Bool,
+        autoPins: Bool,
+        primaryAction: PrimaryMediaAction
+    ) {
+        switch purpose {
+        case .receipt:
+            (.thirtyDays, true, false, false, .shareAndComplete)
+        case .parking:
+            (.untilComplete, false, true, true, .findCar)
+        case .document:
+            (.forever, true, false, false, .automatic)
+        case .qr:
+            (.sevenDays, true, false, false, .open)
+        case .temporary:
+            (.sevenDays, true, false, false, .automatic)
+        default:
+            (.forever, true, false, false, .automatic)
+        }
+    }
+
+    private static func migrateUnusedLegacyTemplates(
+        albums: [Album],
+        presets: [CapturePreset],
+        in context: ModelContext
+    ) {
+        let media = (try? context.fetch(FetchDescriptor<MediaItem>())) ?? []
+        let usedAlbumIDs = Set(media.compactMap(\.albumID))
+        let removableAlbumIDs = Set(albums.filter {
+            $0.isBuiltIn && $0.purpose != .general && !usedAlbumIDs.contains($0.id)
+        }.map(\.id))
+        presets.filter {
+            $0.isBuiltIn && $0.purpose != .general
+                && ($0.albumID.map(removableAlbumIDs.contains) ?? true)
+        }.forEach(context.delete)
+        albums.filter { removableAlbumIDs.contains($0.id) }.forEach(context.delete)
     }
 
     private static func ensureAlbum(

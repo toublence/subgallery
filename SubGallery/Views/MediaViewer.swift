@@ -17,6 +17,7 @@ struct MediaViewer: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Album.sortOrder) private var albums: [Album]
+    @StateObject private var purchases = PurchaseManager.shared
     let items: [MediaItem]
     let initialID: UUID
     let isRecentlyDeleted: Bool
@@ -33,6 +34,9 @@ struct MediaViewer: View {
     @State private var completesAfterShare = false
     @State private var shareTargetID: UUID?
     @State private var actionMessage: String?
+    @State private var showsCompleteConfirmation = false
+    @State private var showsPremium = false
+    @State private var showsReceiptEditor = false
 
     init(items: [MediaItem], initialID: UUID, isRecentlyDeleted: Bool) {
         self.items = items
@@ -52,6 +56,16 @@ struct MediaViewer: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .background(.black)
+            .overlay(alignment: .bottom) {
+                if let current,
+                   purchases.isPremium,
+                   !isRecentlyDeleted,
+                   hasReceiptDetails(current) {
+                    receiptSummary(for: current)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 54)
+                }
+            }
             .toolbarBackground(.black.opacity(0.55), for: .navigationBar, .bottomBar)
             .toolbarColorScheme(.dark, for: .navigationBar, .bottomBar)
             .toolbar {
@@ -70,7 +84,13 @@ struct MediaViewer: View {
                             Spacer()
                             Button(role: .destructive) { showsDelete = true } label: { Label(L10n.text("영구 삭제"), systemImage: "trash") }
                         } else {
-                            representativeActionButton(for: current)
+                            if current.waitingForCompletion {
+                                Button { showsCompleteConfirmation = true } label: {
+                                    Label(L10n.text("완료"), systemImage: "checkmark.circle.fill")
+                                }
+                            } else {
+                                representativeActionButton(for: current)
+                            }
                             Spacer()
                             actionsMenu(for: current)
                         }
@@ -83,6 +103,10 @@ struct MediaViewer: View {
         .sheet(isPresented: $showsRetention) { if let current { RetentionPickerView(item: current) } }
         .sheet(isPresented: $showsReminder) { if let current { ReminderPickerView(item: current) } }
         .sheet(isPresented: $showsAlbumMove) { albumMovePicker }
+        .sheet(isPresented: $showsPremium) { PremiumView() }
+        .sheet(isPresented: $showsReceiptEditor) {
+            if let current { ReceiptDetailsEditorView(item: current) }
+        }
         .sheet(isPresented: $showsShareSheet, onDismiss: cleanupPreparedShare) {
             ActivityShareSheet(urls: preparedShareURLs) { completed in
                 guard completed, completesAfterShare,
@@ -103,6 +127,12 @@ struct MediaViewer: View {
         .confirmationDialog(L10n.text("이 항목을 삭제할까요?"), isPresented: $showsDelete) {
             Button(L10n.text(isRecentlyDeleted ? "영구 삭제" : "삭제"), role: .destructive) { deleteCurrent() }
         }
+        .confirmationDialog(L10n.text("이 사진을 완료 처리할까요?"), isPresented: $showsCompleteConfirmation) {
+            Button(L10n.text("완료 처리")) { completeCurrent() }
+            Button(L10n.text("취소"), role: .cancel) { }
+        } message: {
+            Text(L10n.text("완료한 사진은 최근 삭제로 이동하며 7일 동안 복구할 수 있습니다."))
+        }
         .alert(L10n.text("사진 작업"), isPresented: Binding(
             get: { actionMessage != nil },
             set: { if !$0 { actionMessage = nil } }
@@ -117,7 +147,7 @@ struct MediaViewer: View {
     private func actionsMenu(for item: MediaItem) -> some View {
         Menu {
             if item.waitingForCompletion {
-                Button { completeCurrent() } label: {
+                Button { showsCompleteConfirmation = true } label: {
                     Label(L10n.text("완료"), systemImage: "checkmark.circle.fill")
                 }
                 Divider()
@@ -170,28 +200,52 @@ struct MediaViewer: View {
             Divider()
         }
         if !item.recognizedText.isEmpty {
-            Menu("텍스트") {
+            Menu(L10n.text("텍스트")) {
                 Button { MediaActionService.copy(item.recognizedText) } label: { Label(L10n.text("텍스트 복사"), systemImage: "doc.on.doc") }
                 Button { copyAndFinish(item.recognizedText, item: item) } label: {
                     Label(L10n.text("복사하고 완료"), systemImage: "checkmark.circle")
                 }
             }
         }
+        if hasPremiumSmartContent(item), !purchases.isPremium {
+            Button { showsPremium = true } label: {
+                Label(L10n.text("사진 속 정보 사용"), systemImage: "lock.fill")
+            }
+        }
+        if purchases.isPremium {
+            premiumContentActions(for: item)
+        }
+    }
+
+    @ViewBuilder
+    private func premiumContentActions(for item: MediaItem) -> some View {
+        if hasReceiptDetails(item) {
+            Menu(L10n.text("영수증 정보")) {
+                if !item.receiptAmount.isEmpty {
+                    Button { MediaActionService.copy(item.receiptAmount) } label: {
+                        Label(L10n.text("금액 복사"), systemImage: "doc.on.doc")
+                    }
+                }
+                Button { showsReceiptEditor = true } label: {
+                    Label(L10n.text("정보 수정"), systemImage: "pencil")
+                }
+            }
+        }
         if let value = item.detectedURLs.first {
-            Menu("URL") {
+            Menu(L10n.text("URL")) {
                 Button { openURL(value, item: item, completeAfter: false) } label: { Label(L10n.text("Safari에서 열기"), systemImage: "safari") }
                 Button { openURL(value, item: item, completeAfter: true) } label: { Label(L10n.text("열고 완료"), systemImage: "checkmark.circle") }
             }
         }
         if let value = item.detectedPhoneNumbers.first {
-            Menu("전화번호") {
+            Menu(L10n.text("전화번호")) {
                 Button { call(value) } label: { Label(L10n.text("전화"), systemImage: "phone") }
                 Button { MediaActionService.copy(value) } label: { Label(L10n.text("번호 복사"), systemImage: "doc.on.doc") }
                 Button { copyAndFinish(value, item: item) } label: { Label(L10n.text("복사하고 완료"), systemImage: "checkmark.circle") }
             }
         }
         if let value = item.detectedAddresses.first {
-            Menu("주소") {
+            Menu(L10n.text("주소")) {
                 Button { openAddress(value, item: item, completeAfter: false) } label: { Label(L10n.text("지도에서 열기"), systemImage: "map") }
                 Button { MediaActionService.copy(value) } label: { Label(L10n.text("주소 복사"), systemImage: "doc.on.doc") }
                 Button { openAddress(value, item: item, completeAfter: true) } label: {
@@ -200,7 +254,7 @@ struct MediaViewer: View {
             }
         }
         if let date = item.detectedDates.first {
-            Menu("날짜 및 시간") {
+            Menu(L10n.text("날짜 및 시간")) {
                 Button { addCalendarEvent(date, item: item, completeAfter: false) } label: {
                     Label(L10n.text("캘린더에 추가"), systemImage: "calendar.badge.plus")
                 }
@@ -211,12 +265,17 @@ struct MediaViewer: View {
             }
         }
         if let value = item.detectedQRCodes.first {
-            Menu("QR 코드") {
+            Menu(L10n.text("QR 코드")) {
                 if URL(string: value)?.scheme != nil {
                     Button { openURL(value, item: item, completeAfter: false) } label: { Label(L10n.text("QR 열기"), systemImage: "qrcode") }
                     Button { openURL(value, item: item, completeAfter: true) } label: { Label(L10n.text("열고 완료"), systemImage: "checkmark.circle") }
                 }
                 Button { MediaActionService.copy(value) } label: { Label(L10n.text("내용 복사"), systemImage: "doc.on.doc") }
+            }
+        }
+        if hasPremiumSmartContent(item) {
+            Button { showsCompleteConfirmation = true } label: {
+                Label(L10n.text("처리 완료"), systemImage: "checkmark.circle.fill")
             }
         }
     }
@@ -256,20 +315,62 @@ struct MediaViewer: View {
         switch item.primaryAction {
         case .shareAndComplete: return .shareAndComplete
         case .findCar where item.latitude != nil && item.longitude != nil: return .findCar
-        case .copyAndComplete where !item.recognizedText.isEmpty: return .copyAndComplete
-        case .open where !item.detectedQRCodes.isEmpty: return .openQR
-        case .open where !item.detectedURLs.isEmpty: return .openURL
-        case .addEvent where !item.detectedDates.isEmpty: return .addEvent
+        case .copyAndComplete where purchases.isPremium && !item.recognizedText.isEmpty: return .copyAndComplete
+        case .open where purchases.isPremium && !item.detectedQRCodes.isEmpty: return .openQR
+        case .open where purchases.isPremium && !item.detectedURLs.isEmpty: return .openURL
+        case .addEvent where purchases.isPremium && !item.detectedDates.isEmpty: return .addEvent
         default: break
         }
         if item.purpose == .parking, item.latitude != nil, item.longitude != nil { return .findCar }
         if item.purpose == .receipt { return .shareAndComplete }
+        guard purchases.isPremium else { return .shareAndComplete }
         if !item.detectedQRCodes.isEmpty { return .openQR }
         if !item.detectedURLs.isEmpty { return .openURL }
         if !item.detectedDates.isEmpty { return .addEvent }
         if !item.detectedPhoneNumbers.isEmpty { return .call }
         if !item.recognizedText.isEmpty { return .copyAndComplete }
         return .shareAndComplete
+    }
+
+    private func hasPremiumSmartContent(_ item: MediaItem) -> Bool {
+        hasReceiptDetails(item)
+            || !item.detectedURLs.isEmpty
+            || !item.detectedPhoneNumbers.isEmpty
+            || !item.detectedAddresses.isEmpty
+            || !item.detectedDates.isEmpty
+            || !item.detectedQRCodes.isEmpty
+    }
+
+    private func hasReceiptDetails(_ item: MediaItem) -> Bool {
+        !item.receiptMerchant.isEmpty || !item.receiptAmount.isEmpty || item.receiptDate != nil
+    }
+
+    private func receiptSummary(for item: MediaItem) -> some View {
+        Button { showsReceiptEditor = true } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "receipt.fill")
+                    .font(.title3)
+                    .foregroundStyle(.tint)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.receiptMerchant.isEmpty ? L10n.text("영수증 정보") : item.receiptMerchant)
+                        .font(.subheadline.weight(.semibold))
+                    HStack(spacing: 8) {
+                        if let date = item.receiptDate {
+                            Text(date.formatted(date: .numeric, time: .omitted))
+                        }
+                        if !item.receiptAmount.isEmpty { Text(item.receiptAmount) }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "pencil")
+                    .foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private func representativeTitle(_ action: RepresentativeMediaAction) -> String {
@@ -458,6 +559,59 @@ private struct ViewerPage: View {
     }
 }
 
+private struct ReceiptDetailsEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    let item: MediaItem
+    @State private var merchant: String
+    @State private var amount: String
+    @State private var includesDate: Bool
+    @State private var date: Date
+
+    init(item: MediaItem) {
+        self.item = item
+        _merchant = State(initialValue: item.receiptMerchant)
+        _amount = State(initialValue: item.receiptAmount)
+        _includesDate = State(initialValue: item.receiptDate != nil)
+        _date = State(initialValue: item.receiptDate ?? .now)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField(L10n.text("상호명"), text: $merchant)
+                    TextField(L10n.text("금액"), text: $amount)
+                        .keyboardType(.decimalPad)
+                    Toggle(L10n.text("날짜"), isOn: $includesDate)
+                    if includesDate {
+                        DatePicker(L10n.text("날짜"), selection: $date, displayedComponents: .date)
+                    }
+                } footer: {
+                    Text(L10n.text("인식 결과가 정확하지 않으면 직접 수정할 수 있습니다."))
+                }
+            }
+            .navigationTitle(L10n.text("영수증 정보"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.text("취소")) { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L10n.text("저장")) {
+                        item.receiptMerchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
+                        item.receiptAmount = amount.trimmingCharacters(in: .whitespacesAndNewlines)
+                        item.receiptDate = includesDate ? date : nil
+                        try? modelContext.save()
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
 struct MediaInfoView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -465,6 +619,8 @@ struct MediaInfoView: View {
     @State private var metadataEntries: [MediaMetadataEntry] = []
     @State private var isCreatingCleanCopy = false
     @State private var metadataMessage: String?
+    @StateObject private var purchases = PurchaseManager.shared
+    @State private var showsPremium = false
 
     var body: some View {
         NavigationStack {
@@ -497,9 +653,13 @@ struct MediaInfoView: View {
                 }
                 Section(L10n.text("개인정보 보호")) {
                     Button {
-                        createMetadataFreeCopy()
+                        if purchases.isPremium { createMetadataFreeCopy() }
+                        else { showsPremium = true }
                     } label: {
-                        Label(L10n.text("메타데이터 제거본 만들기"), systemImage: "shield.lefthalf.filled")
+                        Label(
+                            L10n.text("메타데이터 제거본 만들기"),
+                            systemImage: purchases.isPremium ? "shield.lefthalf.filled" : "lock.fill"
+                        )
                     }
                     .disabled(isCreatingCleanCopy)
                     if isCreatingCleanCopy { ProgressView("제거본 만드는 중…") }
@@ -513,6 +673,7 @@ struct MediaInfoView: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L10n.text("완료")) { dismiss() } } }
         }
         .presentationDetents([.large])
+        .sheet(isPresented: $showsPremium) { PremiumView() }
         .task {
             guard item.kind == .photo else { return }
             metadataEntries = await MediaStorage.shared.detailedMetadata(for: item.localPath)

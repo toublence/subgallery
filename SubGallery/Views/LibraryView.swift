@@ -56,6 +56,7 @@ struct LibraryView: View {
     @AppStorage("app.startScreen") private var appStartScreenRaw = AppStartScreen.library.rawValue
     @AppStorage("app.lastScreen") private var lastScreenRaw = AppStartScreen.library.rawValue
     @AppStorage("app.lastLibraryDestination") private var lastLibraryDestination = ""
+    @StateObject private var purchases = PurchaseManager.shared
 
     @State private var newAlbumName = ""
     @State private var showsNewAlbum = false
@@ -75,6 +76,9 @@ struct LibraryView: View {
     @State private var coverAlbum: Album?
     @State private var retentionAlbum: Album?
     @State private var rulesAlbum: Album?
+    @State private var classificationItem: MediaItem?
+    @State private var showsTemplates = false
+    @State private var showsCleanupCenter = false
     @State private var albumPendingDeletion: Album?
     @State private var navigationPath: [AlbumDestination] = {
         guard StoreScreenshotMode.isEnabled else { return [] }
@@ -102,6 +106,13 @@ struct LibraryView: View {
             ScrollView {
                 if searchText.isEmpty {
                     VStack(alignment: .leading, spacing: 28) {
+                        if !media.filter({ $0.deletedAt == nil }).isEmpty {
+                            CleanupSummaryCard(summary: CleanupSummary(items: media)) {
+                                if purchases.isPremium { showsCleanupCenter = true }
+                                else { showsPremium = true }
+                            }
+                        }
+
                         LazyVGrid(columns: columns, spacing: albumGridSpacing) {
                             ForEach(SmartAlbum.libraryCases, id: \.self) { smart in
                                 NavigationLink(value: AlbumDestination.smart(smart)) {
@@ -167,6 +178,9 @@ struct LibraryView: View {
                         Label(L10n.text("새 앨범"), systemImage: "plus")
                     }
                     Menu {
+                        Button { showsTemplates = true } label: {
+                            Label(L10n.text("템플릿 추가"), systemImage: "square.grid.2x2")
+                        }
                         NavigationLink(value: AlbumDestination.smart(.recentlyDeleted)) {
                             Label(L10n.text("최근 삭제"), systemImage: "trash")
                         }
@@ -204,6 +218,14 @@ struct LibraryView: View {
             .onAppear {
                 restoreLastDestinationIfNeeded()
                 requestReviewIfAppropriate()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .smartClassificationSuggested)) { notification in
+                guard !isCameraPresented,
+                      let id = notification.object as? UUID,
+                      let item = media.first(where: { $0.id == id && $0.classificationStatus == .suggested }) else {
+                    return
+                }
+                classificationItem = item
             }
             .onChange(of: isCameraPresented) { _, isPresented in
                 if !isPresented { requestReviewIfAppropriate() }
@@ -272,6 +294,21 @@ struct LibraryView: View {
         }
         .sheet(item: $rulesAlbum) { album in
             AlbumRulesView(album: album)
+                .presentationDetents([.large])
+        }
+        .sheet(item: $classificationItem) { item in
+            SmartClassificationSuggestionView(item: item)
+                .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showsTemplates) {
+            AlbumTemplatePickerView {
+                showsTemplates = false
+                showsNewAlbum = true
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showsCleanupCenter) {
+            CleanupCenterView()
                 .presentationDetents([.large])
         }
         .fullScreenCover(item: $viewerItem) { item in
@@ -354,7 +391,12 @@ struct LibraryView: View {
             Button { coverAlbum = album } label: { Label(L10n.text("대표 사진 변경"), systemImage: "photo") }
                 .disabled(albumMedia.isEmpty)
             Button { retentionAlbum = album } label: { Label(L10n.text("기본 보관 기간"), systemImage: "clock") }
-            Button { rulesAlbum = album } label: { Label(L10n.text("앨범 규칙"), systemImage: "slider.horizontal.3") }
+            Button {
+                if purchases.isPremium { rulesAlbum = album }
+                else { showsPremium = true }
+            } label: {
+                Label(L10n.text("앨범 규칙"), systemImage: purchases.isPremium ? "slider.horizontal.3" : "lock.fill")
+            }
             Divider()
             Button(role: .destructive) { albumPendingDeletion = album } label: {
                 Label(L10n.text("앨범 삭제"), systemImage: "trash")
@@ -573,10 +615,527 @@ private extension AlbumDestination {
     }
 }
 
+private enum CleanupCategory: String, CaseIterable, Identifiable {
+    case today
+    case soon
+    case waiting
+    case oldTemporary
+    case recommendation
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .today: L10n.text("오늘 만료")
+        case .soon: L10n.text("곧 만료")
+        case .waiting: L10n.text("완료 대기")
+        case .oldTemporary: L10n.text("오래된 임시 사진")
+        case .recommendation: L10n.text("정리 추천")
+        }
+    }
+}
+
+private struct CleanupSummary {
+    let today: [MediaItem]
+    let soon: [MediaItem]
+    let waiting: [MediaItem]
+    let oldTemporary: [MediaItem]
+    let recommendations: [MediaItem]
+
+    init(items: [MediaItem], now: Date = .now) {
+        let active = items.filter { $0.deletedAt == nil }
+        let startOfTomorrow = Calendar.current.date(
+            byAdding: .day,
+            value: 1,
+            to: Calendar.current.startOfDay(for: now)
+        ) ?? now
+        let endOfToday = startOfTomorrow.addingTimeInterval(-1)
+        let week = Calendar.current.date(byAdding: .day, value: 7, to: endOfToday) ?? endOfToday
+        let oldThreshold = Calendar.current.date(byAdding: .day, value: -30, to: now) ?? now
+
+        today = active.filter {
+            !$0.waitingForCompletion && ($0.expirationDate ?? .distantFuture) <= endOfToday
+        }
+        let usedToday = Set(today.map(\.id))
+        soon = active.filter {
+            !usedToday.contains($0.id)
+                && !$0.waitingForCompletion
+                && ($0.expirationDate ?? .distantFuture) <= week
+        }
+        let usedSoon = usedToday.union(soon.map(\.id))
+        waiting = active.filter { !usedSoon.contains($0.id) && $0.waitingForCompletion }
+        let usedWaiting = usedSoon.union(waiting.map(\.id))
+        oldTemporary = active.filter {
+            !usedWaiting.contains($0.id)
+                && $0.importedAt <= oldThreshold
+                && ($0.purpose == .temporary || $0.expirationDate != nil)
+        }
+        let usedOld = usedWaiting.union(oldTemporary.map(\.id))
+        recommendations = active.filter {
+            !usedOld.contains($0.id) && $0.classificationStatus == .suggested
+        }
+    }
+
+    var totalCount: Int {
+        today.count + soon.count + waiting.count + oldTemporary.count + recommendations.count
+    }
+
+    func items(for category: CleanupCategory) -> [MediaItem] {
+        switch category {
+        case .today: today
+        case .soon: soon
+        case .waiting: waiting
+        case .oldTemporary: oldTemporary
+        case .recommendation: recommendations
+        }
+    }
+}
+
+private struct CleanupSummaryCard: View {
+    let summary: CleanupSummary
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label(
+                        L10n.format("정리할 사진 %d장", summary.totalCount),
+                        systemImage: "checklist"
+                    )
+                    .font(.headline.bold())
+                    Spacer()
+                    Text(L10n.text("정리하기"))
+                        .font(.subheadline.bold())
+                        .foregroundStyle(Color.accentColor)
+                    Image(systemName: "chevron.forward")
+                        .font(.caption.bold())
+                        .foregroundStyle(Color.accentColor)
+                }
+                HStack(spacing: 14) {
+                    cleanupMetric("오늘 정리", count: summary.today.count)
+                    cleanupMetric("곧 만료", count: summary.soon.count)
+                    cleanupMetric("완료 대기", count: summary.waiting.count)
+                }
+            }
+            .padding(16)
+            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.accentColor.opacity(0.25))
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func cleanupMetric(_ title: String, count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(L10n.text(title)).font(.caption).foregroundStyle(.secondary)
+            Text(L10n.format("%d장", count)).font(.subheadline.bold())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct CleanupCenterView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \MediaItem.createdAt, order: .reverse) private var media: [MediaItem]
+    @StateObject private var purchases = PurchaseManager.shared
+    @State private var selection = Set<UUID>()
+    @State private var isSelecting = false
+    @State private var viewerItem: MediaItem?
+    @State private var classificationItem: MediaItem?
+    @State private var pendingDelete = Set<UUID>()
+    @State private var pendingComplete = Set<UUID>()
+    @State private var showsPremium = false
+
+    private var summary: CleanupSummary { CleanupSummary(items: media) }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if purchases.isPremium { cleanupList }
+                else { premiumRequired }
+            }
+            .navigationTitle(L10n.text("정리 센터"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.text("닫기")) { dismiss() }
+                }
+                if purchases.isPremium && summary.totalCount > 0 {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(L10n.text(isSelecting ? "완료" : "선택")) {
+                            isSelecting.toggle()
+                            if !isSelecting { selection.removeAll() }
+                        }
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if isSelecting && !selection.isEmpty { batchActions }
+            }
+        }
+        .task { await purchases.prepare() }
+        .fullScreenCover(item: $viewerItem) { item in
+            MediaViewer(items: activeCleanupItems, initialID: item.id, isRecentlyDeleted: false)
+        }
+        .sheet(item: $classificationItem) { item in
+            SmartClassificationSuggestionView(item: item)
+                .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showsPremium) {
+            PremiumView().presentationDetents([.large])
+        }
+        .confirmationDialog(L10n.text("선택한 사진을 완료 처리할까요?"), isPresented: Binding(
+            get: { !pendingComplete.isEmpty },
+            set: { if !$0 { pendingComplete.removeAll() } }
+        ), titleVisibility: .visible) {
+            Button(L10n.text("완료 처리")) { complete(pendingComplete) }
+            Button(L10n.text("취소"), role: .cancel) { pendingComplete.removeAll() }
+        }
+        .confirmationDialog(L10n.text("선택한 사진을 최근 삭제로 이동할까요?"), isPresented: Binding(
+            get: { !pendingDelete.isEmpty },
+            set: { if !$0 { pendingDelete.removeAll() } }
+        ), titleVisibility: .visible) {
+            Button(L10n.text("삭제"), role: .destructive) { delete(pendingDelete) }
+            Button(L10n.text("취소"), role: .cancel) { pendingDelete.removeAll() }
+        } message: {
+            Text(L10n.text("최근 삭제에서 7일 동안 복구할 수 있습니다."))
+        }
+    }
+
+    private var cleanupList: some View {
+        List {
+            if summary.totalCount == 0 {
+                ContentUnavailableView(
+                    L10n.text("정리할 사진이 없습니다"),
+                    systemImage: "checkmark.circle",
+                    description: Text(L10n.text("지금은 확인이 필요한 사진이 없습니다."))
+                )
+            } else {
+                ForEach(CleanupCategory.allCases) { category in
+                    let items = summary.items(for: category)
+                    if !items.isEmpty {
+                        Section(category.title) {
+                            ForEach(items) { item in cleanupRow(item, category: category) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var premiumRequired: some View {
+        ContentUnavailableView {
+            Label(L10n.text("정리 센터는 Premium 기능입니다"), systemImage: "lock.fill")
+        } description: {
+            Text(L10n.text("만료 예정과 완료 대기 사진을 한곳에서 빠르게 정리합니다."))
+        } actions: {
+            Button(L10n.text("Premium 보기")) { showsPremium = true }
+                .buttonStyle(.borderedProminent)
+        }
+    }
+
+    @ViewBuilder
+    private func cleanupRow(_ item: MediaItem, category: CleanupCategory) -> some View {
+        Button {
+            if isSelecting {
+                if selection.contains(item.id) { selection.remove(item.id) }
+                else { selection.insert(item.id) }
+            } else {
+                viewerItem = item
+            }
+        } label: {
+            HStack(spacing: 12) {
+                MediaThumbnail(item: item)
+                    .frame(width: 58, height: 58)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.fileName).lineLimit(1).foregroundStyle(.primary)
+                    Text(RetentionService.statusText(for: item))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if isSelecting {
+                    Image(systemName: selection.contains(item.id) ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selection.contains(item.id) ? Color.accentColor : Color.secondary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            Button(L10n.text("계속 보관")) { keepForever([item.id]) }
+                .tint(.blue)
+            Button(L10n.text("7일 연장")) { extendSevenDays([item.id]) }
+                .tint(.indigo)
+            if category == .recommendation {
+                Button(L10n.text("추천 보기")) { classificationItem = item }
+                    .tint(.purple)
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(L10n.text("삭제"), role: .destructive) { pendingDelete = [item.id] }
+            if item.waitingForCompletion {
+                Button(L10n.text("완료")) { pendingComplete = [item.id] }
+                    .tint(.green)
+            }
+        }
+    }
+
+    private var batchActions: some View {
+        HStack(spacing: 12) {
+            Menu {
+                Button(L10n.text("계속 보관")) { keepForever(selection) }
+                Button(L10n.text("7일 연장")) { extendSevenDays(selection) }
+                Button(L10n.text("완료 처리")) { pendingComplete = selection }
+                Divider()
+                Button(L10n.text("삭제"), role: .destructive) { pendingDelete = selection }
+            } label: {
+                Label(L10n.format("%d개 작업", selection.count), systemImage: "ellipsis.circle")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+    }
+
+    private var activeCleanupItems: [MediaItem] {
+        CleanupCategory.allCases.flatMap { summary.items(for: $0) }
+    }
+
+    private func items(with ids: Set<UUID>) -> [MediaItem] {
+        media.filter { ids.contains($0.id) && $0.deletedAt == nil }
+    }
+
+    private func keepForever(_ ids: Set<UUID>) {
+        items(with: ids).forEach { RetentionService.apply(.forever, to: $0) }
+        finishBatch()
+    }
+
+    private func extendSevenDays(_ ids: Set<UUID>) {
+        items(with: ids).forEach { RetentionService.apply(.sevenDays, to: $0) }
+        finishBatch()
+    }
+
+    private func complete(_ ids: Set<UUID>) {
+        let targets = items(with: ids)
+        pendingComplete.removeAll()
+        Task {
+            for item in targets { await MediaLifecycleService.complete(item) }
+            finishBatch()
+        }
+    }
+
+    private func delete(_ ids: Set<UUID>) {
+        let targets = items(with: ids)
+        pendingDelete.removeAll()
+        Task {
+            for item in targets { await MediaLifecycleService.moveToRecentlyDeleted(item) }
+            finishBatch()
+        }
+    }
+
+    private func finishBatch() {
+        try? modelContext.save()
+        selection.removeAll()
+        isSelecting = false
+    }
+}
+
+struct AlbumTemplatePickerView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \Album.sortOrder) private var albums: [Album]
+    let createCustom: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(CapturePresetService.templatePurposes) { purpose in
+                        Button {
+                            _ = CapturePresetService.addTemplate(purpose, in: modelContext)
+                            dismiss()
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: templateSymbol(for: purpose))
+                                    .frame(width: 28)
+                                    .foregroundStyle(Color.accentColor)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(purpose.title).foregroundStyle(.primary)
+                                    Text(SmartClassificationService.defaultRetention(for: purpose).title)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if albums.contains(where: { $0.purpose == purpose }) {
+                                    Text(L10n.text("추가됨"))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .disabled(albums.contains(where: { $0.purpose == purpose }))
+                    }
+                    Button {
+                        dismiss()
+                        createCustom()
+                    } label: {
+                        Label(L10n.text("직접 만들기"), systemImage: "plus")
+                    }
+                } footer: {
+                    Text(L10n.text("템플릿은 앨범과 기본 보관 기간을 함께 설정합니다."))
+                }
+            }
+            .navigationTitle(L10n.text("템플릿 추가"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.text("닫기")) { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func templateSymbol(for purpose: CapturePurpose) -> String {
+        switch purpose {
+        case .receipt: "receipt"
+        case .parking: "car"
+        case .document: "doc.text"
+        case .qr: "qrcode"
+        case .temporary: "clock"
+        default: "folder"
+        }
+    }
+}
+
+struct SmartClassificationSuggestionView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \Album.sortOrder) private var albums: [Album]
+    let item: MediaItem
+    @State private var isChanging = false
+    @State private var albumSelection: String
+    @State private var retention: RetentionPolicy
+
+    init(item: MediaItem) {
+        self.item = item
+        _albumSelection = State(initialValue: item.suggestedAlbumID?.uuidString ?? "suggested")
+        _retention = State(initialValue: item.suggestedRetention ?? .forever)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 18) {
+                Image(systemName: "sparkles.rectangle.stack")
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 64, height: 64)
+                    .background(Color.accentColor.opacity(0.1), in: Circle())
+
+                VStack(spacing: 6) {
+                    Text(L10n.format("%@으로 보입니다", suggestedPurpose.title))
+                        .font(.title2.bold())
+                    Text(L10n.text("사진을 이동하기 전에 추천 내용을 확인하세요."))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                if isChanging {
+                    Form {
+                        Picker(L10n.text("추천 앨범"), selection: $albumSelection) {
+                            if item.suggestedAlbumID == nil {
+                                Text(suggestedPurpose.title).tag("suggested")
+                            }
+                            Text(L10n.text("미분류")).tag("none")
+                            ForEach(albums) { album in
+                                Text(album.displayName).tag(album.id.uuidString)
+                            }
+                        }
+                        Picker(L10n.text("보관 기간"), selection: $retention) {
+                            ForEach(RetentionPolicy.allCases.filter { $0 != .customDate }) { policy in
+                                Text(policy.title).tag(policy)
+                            }
+                        }
+                    }
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 180)
+                } else {
+                    VStack(spacing: 0) {
+                        LabeledContent(L10n.text("추천 앨범"), value: recommendedAlbumName)
+                        Divider().padding(.vertical, 12)
+                        LabeledContent(L10n.text("보관 기간"), value: retention.title)
+                    }
+                    .padding(16)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+
+                VStack(spacing: 10) {
+                    Button(L10n.text("추천 적용")) { applySuggestion() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity)
+                    Button(L10n.text(isChanging ? "추천대로 돌아가기" : "변경")) {
+                        isChanging.toggle()
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(20)
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle(L10n.text("스마트 자동 분류"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.text("추천 안 함")) {
+                        SmartClassificationService.dismiss(item, in: modelContext)
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private var suggestedPurpose: CapturePurpose {
+        item.suggestedPurpose ?? .custom
+    }
+
+    private var recommendedAlbumName: String {
+        if let id = UUID(uuidString: albumSelection),
+           let album = albums.first(where: { $0.id == id }) {
+            return album.displayName
+        }
+        return albumSelection == "none" ? L10n.text("미분류") : suggestedPurpose.title
+    }
+
+    private func applySuggestion() {
+        let album: Album?
+        if let id = UUID(uuidString: albumSelection) {
+            album = albums.first { $0.id == id }
+        } else if albumSelection == "suggested" {
+            album = CapturePresetService.addTemplate(suggestedPurpose, in: modelContext)
+        } else {
+            album = nil
+        }
+        SmartClassificationService.apply(item, album: album, retention: retention, in: modelContext)
+        dismiss()
+    }
+}
+
 struct AlbumRulesView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     let album: Album
+    @StateObject private var purchases = PurchaseManager.shared
+    @State private var showsPremium = false
     @State private var customDate: Date
 
     init(album: Album) {
@@ -588,7 +1147,54 @@ struct AlbumRulesView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            Group {
+                if purchases.isPremium { rulesForm }
+                else {
+                    ContentUnavailableView {
+                        Label(L10n.text("스마트 규칙은 Premium 기능입니다"), systemImage: "lock.fill")
+                    } description: {
+                        Text(L10n.text("사진을 분석해 앨범과 보관 기간을 추천합니다."))
+                    } actions: {
+                        Button(L10n.text("Premium 보기")) { showsPremium = true }
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
+            }
+            .navigationTitle(L10n.text("앨범 규칙"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L10n.text("완료")) { try? modelContext.save(); dismiss() }
+                }
+            }
+        }
+        .task { await purchases.prepare() }
+        .sheet(isPresented: $showsPremium) {
+            PremiumView().presentationDetents([.large])
+        }
+    }
+
+    private var rulesForm: some View {
+        Form {
+                Section {
+                    Toggle(L10n.text("스마트 자동 분류"), isOn: Binding(
+                        get: { album.smartRuleEnabled },
+                        set: {
+                            album.smartRuleEnabled = $0
+                            if $0 { album.ocrEnabled = true }
+                        }
+                    ))
+                    TextField(L10n.text("키워드"), text: Binding(
+                        get: { album.smartRuleKeywords },
+                        set: { album.smartRuleKeywords = $0 }
+                    ), axis: .vertical)
+                    Text(L10n.text("쉼표로 구분한 키워드가 사진 속 텍스트에 있으면 이 앨범을 추천합니다."))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text(L10n.text("자동 분류 규칙"))
+                }
+
                 Section(L10n.text("목적")) {
                     Picker(L10n.text("앨범 목적"), selection: Binding(
                         get: { album.purpose },
@@ -634,14 +1240,6 @@ struct AlbumRulesView: View {
                     }
                 }
             }
-            .navigationTitle(L10n.text("앨범 규칙"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(L10n.text("완료")) { try? modelContext.save(); dismiss() }
-                }
-            }
-        }
     }
 }
 

@@ -3,6 +3,7 @@ import AppTrackingTransparency
 import CloudKit
 import CoreData
 import CryptoKit
+import FirebaseAnalytics
 import FirebaseCore
 import Security
 import SwiftData
@@ -13,6 +14,7 @@ import UserNotifications
 extension Notification.Name {
     static let openReminderMedia = Notification.Name("openReminderMedia")
     static let replayOnboarding = Notification.Name("replayOnboarding")
+    static let smartClassificationSuggested = Notification.Name("smartClassificationSuggested")
 }
 
 enum StoreScreenshotMode {
@@ -112,6 +114,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()
         }
+        Analytics.setAnalyticsCollectionEnabled(true)
         UNUserNotificationCenter.current().delegate = self
         application.registerForRemoteNotifications()
         cloudEventObserver = NotificationCenter.default.addObserver(

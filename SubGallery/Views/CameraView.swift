@@ -19,6 +19,7 @@ struct CameraView: View {
     @State private var loadedDefaults = false
     @State private var showsAlbumCoachMark = false
     @State private var showsRetentionCoachMark = false
+    @State private var classificationItem: MediaItem?
     @AppStorage("storage.defaultRetention") private var defaultRetentionRaw = RetentionPolicy.forever.rawValue
     @AppStorage("storage.defaultRetentionDate") private var defaultRetentionDate = 0.0
     @AppStorage("camera.lastMode") private var lastMode = MediaKind.photo.rawValue
@@ -77,6 +78,26 @@ struct CameraView: View {
             .alert(L10n.text("마이크 접근이 필요합니다."), isPresented: $camera.needsMicrophoneSettings) {
                 Button(L10n.text("취소"), role: .cancel) { }
                 Button(L10n.text("설정 열기"), action: openAppSettings)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .smartClassificationSuggested)) { notification in
+                guard let id = notification.object as? UUID,
+                      lastCapture?.id == id,
+                      classificationItem == nil,
+                      let item = media.first(where: { $0.id == id && $0.classificationStatus == .suggested }) else {
+                    return
+                }
+                showsAlbumCoachMark = false
+                showsRetentionCoachMark = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    guard lastCapture?.id == id,
+                          item.classificationStatus == .suggested,
+                          classificationItem == nil else { return }
+                    classificationItem = item
+                }
+            }
+            .sheet(item: $classificationItem) { item in
+                SmartClassificationSuggestionView(item: item)
+                    .presentationDetents([.medium, .large])
             }
     }
 
@@ -357,6 +378,8 @@ struct CameraView: View {
         case .receipt: "receipt"
         case .parking: "car.fill"
         case .document: "doc.text"
+        case .qr: "qrcode"
+        case .temporary: "clock"
         case .travel: "airplane"
         case .custom: "scope"
         }
@@ -532,7 +555,7 @@ struct CameraView: View {
         OCRService.enqueue(item, in: modelContext)
         lastCapture = item
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        if !albumCoachMarkSeen {
+        if !albumCoachMarkSeen && !PremiumAccess.isActive {
             showsAlbumCoachMark = true
         }
     }

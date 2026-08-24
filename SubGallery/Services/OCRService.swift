@@ -12,6 +12,8 @@ struct MediaAnalysisResult: Sendable {
     let qrCodes: [String]
     let receiptMerchant: String
     let receiptAmount: String
+    let textLineCount: Int
+    let textCoverage: Double
 }
 
 actor OCRService {
@@ -47,6 +49,9 @@ actor OCRService {
             .compactMap { $0.topCandidates(1).first?.string.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty && seen.insert($0).inserted }
         let text = lines.joined(separator: "\n")
+        let textCoverage = min(1, (automatic.results ?? []).reduce(0.0) {
+            $0 + Double($1.boundingBox.width * $1.boundingBox.height)
+        })
         let detected = detectData(in: text)
         let qrCodes = unique((barcode.results ?? []).compactMap(\.payloadStringValue))
         let qrURLs = qrCodes.compactMap { normalizedURLString($0) }
@@ -59,7 +64,9 @@ actor OCRService {
             dates: detected.dates,
             qrCodes: qrCodes,
             receiptMerchant: receiptMerchant(in: lines),
-            receiptAmount: receiptAmount(in: lines)
+            receiptAmount: receiptAmount(in: lines),
+            textLineCount: lines.count,
+            textCoverage: textCoverage
         )
     }
 
@@ -122,9 +129,11 @@ actor OCRService {
             return ["합계", "결제", "총액", "total", "amount"].contains(where: lowercased.contains)
         }
         let candidates = preferred.map { [$0] } ?? lines.filter {
-            $0.contains("₩") || $0.contains("원") || $0.uppercased().contains("KRW")
+            let uppercased = $0.uppercased()
+            return ["₩", "￦", "$", "€", "£", "¥", "원"].contains(where: $0.contains)
+                || ["KRW", "USD", "EUR", "GBP", "JPY", "CNY", "RMB"].contains(where: uppercased.contains)
         }
-        let pattern = #"(?:₩|￦|KRW\s*)?\d{1,3}(?:,\d{3})+(?:\s*원)?|(?:₩|￦|KRW\s*)\d+(?:\s*원)?"#
+        let pattern = #"(?:(?:₩|￦|\$|€|£|¥|KRW|USD|EUR|GBP|JPY|CNY|RMB)\s*)?(?:\d{1,3}(?:[,.\s]\d{3})+|\d+)(?:[,.]\d{2})?\s*(?:원|KRW|USD|EUR|GBP|JPY|CNY|RMB)?"#
         guard let expression = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return "" }
         for line in candidates {
             let range = NSRange(line.startIndex..<line.endIndex, in: line)
@@ -160,10 +169,16 @@ actor OCRService {
                 item.detectedAddresses = result.addresses
                 item.detectedDates = result.dates
                 item.detectedQRCodes = result.qrCodes
-                if item.purpose == .receipt {
-                    item.receiptMerchant = result.receiptMerchant
-                    item.receiptAmount = result.receiptAmount
-                    item.receiptDate = result.dates.first
+                if PremiumAccess.isActive {
+                    SmartClassificationService.evaluate(result, for: item, in: context)
+                    let isReceipt = item.purpose == .receipt
+                        || item.suggestedPurpose == .receipt
+                        || SmartClassificationService.isHighConfidenceReceipt(result, text: result.text)
+                    if isReceipt {
+                        if item.receiptMerchant.isEmpty { item.receiptMerchant = result.receiptMerchant }
+                        if item.receiptAmount.isEmpty { item.receiptAmount = result.receiptAmount }
+                        if item.receiptDate == nil { item.receiptDate = result.dates.first }
+                    }
                 }
                 item.ocrStatus = .completed
             } catch {
@@ -171,6 +186,109 @@ actor OCRService {
             }
             try? context.save()
         }
+    }
+}
+
+@MainActor
+enum SmartClassificationService {
+    static func evaluate(_ result: MediaAnalysisResult, for item: MediaItem, in context: ModelContext) {
+        guard PremiumAccess.isActive,
+              item.deletedAt == nil,
+              item.classificationStatus == .pending else { return }
+
+        let albums = (try? context.fetch(FetchDescriptor<Album>())) ?? []
+        let normalizedText = result.text.folding(
+            options: [.caseInsensitive, .diacriticInsensitive],
+            locale: .current
+        )
+
+        let customMatch = albums.first { album in
+            guard album.smartRuleEnabled else { return false }
+            let keywords = album.smartRuleKeywords
+                .components(separatedBy: CharacterSet(charactersIn: ",\n"))
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            return !keywords.isEmpty && keywords.contains {
+                normalizedText.localizedCaseInsensitiveContains($0)
+            }
+        }
+
+        let purpose: CapturePurpose?
+        if let customMatch {
+            purpose = customMatch.purpose
+        } else if isHighConfidenceReceipt(result, text: normalizedText) {
+            purpose = .receipt
+        } else if !result.qrCodes.isEmpty {
+            purpose = .qr
+        } else if isHighConfidenceDocument(result) {
+            purpose = .document
+        } else {
+            purpose = nil
+        }
+
+        guard let purpose else {
+            item.classificationStatus = .none
+            try? context.save()
+            return
+        }
+
+        let targetAlbum = customMatch
+            ?? albums.first(where: { $0.smartRuleEnabled && $0.purpose == purpose })
+            ?? albums.first(where: { $0.purpose == purpose })
+        let retention = targetAlbum?.defaultRetention ?? defaultRetention(for: purpose)
+
+        item.suggestedPurpose = purpose
+        item.suggestedAlbumID = targetAlbum?.id
+        item.suggestedRetention = retention
+        item.classificationStatus = .suggested
+        try? context.save()
+        NotificationCenter.default.post(name: .smartClassificationSuggested, object: item.id)
+    }
+
+    static func apply(
+        _ item: MediaItem,
+        album: Album?,
+        retention: RetentionPolicy,
+        in context: ModelContext
+    ) {
+        item.albumID = album?.id
+        item.purpose = album?.purpose ?? item.suggestedPurpose ?? .general
+        item.analysisEnabled = album?.ocrEnabled ?? true
+        item.primaryAction = album?.primaryAction ?? .automatic
+        RetentionService.apply(retention, customDate: album?.defaultRetentionDate, to: item)
+        item.classificationStatus = .applied
+        try? context.save()
+    }
+
+    static func dismiss(_ item: MediaItem, in context: ModelContext) {
+        item.classificationStatus = .dismissed
+        try? context.save()
+    }
+
+    static func defaultRetention(for purpose: CapturePurpose) -> RetentionPolicy {
+        switch purpose {
+        case .receipt: .thirtyDays
+        case .temporary, .qr: .sevenDays
+        case .parking: .untilComplete
+        default: .forever
+        }
+    }
+
+    static func isHighConfidenceReceipt(_ result: MediaAnalysisResult, text: String) -> Bool {
+        let receiptTerms = [
+            "합계", "총액", "결제", "승인", "영수증", "total", "amount", "receipt",
+            "summe", "gesamt", "importe", "total", "合計", "領収", "总计", "總計", "الإجمالي"
+        ]
+        let hasReceiptTerm = receiptTerms.contains { text.localizedCaseInsensitiveContains($0) }
+        let hasIdentity = !result.receiptMerchant.isEmpty
+        let hasDate = !result.dates.isEmpty
+        return !result.receiptAmount.isEmpty && hasReceiptTerm && (hasIdentity || hasDate)
+    }
+
+    private static func isHighConfidenceDocument(_ result: MediaAnalysisResult) -> Bool {
+        result.textLineCount >= 8
+            && result.text.count >= 160
+            && result.textCoverage >= 0.12
     }
 }
 

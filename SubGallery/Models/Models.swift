@@ -105,6 +105,8 @@ enum CapturePurpose: String, Codable, CaseIterable, Identifiable {
     case receipt
     case parking
     case document
+    case qr
+    case temporary
     case travel
     case custom
 
@@ -116,10 +118,20 @@ enum CapturePurpose: String, Codable, CaseIterable, Identifiable {
         case .receipt: L10n.text("영수증")
         case .parking: L10n.text("주차")
         case .document: L10n.text("문서")
+        case .qr: L10n.text("QR")
+        case .temporary: L10n.text("임시 사진")
         case .travel: L10n.text("여행")
         case .custom: L10n.text("사용자 설정")
         }
     }
+}
+
+enum SmartClassificationStatus: String, Codable {
+    case none
+    case pending
+    case suggested
+    case dismissed
+    case applied
 }
 
 enum PrimaryMediaAction: String, Codable, CaseIterable, Identifiable {
@@ -193,6 +205,10 @@ final class MediaItem {
     var completionRestoreExpirationTypeRaw: String = "forever"
     var completionRestoreExpirationDate: Date?
     var completionRestoreReminderDate: Date?
+    var classificationStatusRaw: String = SmartClassificationStatus.none.rawValue
+    var suggestedPurposeRaw: String?
+    var suggestedAlbumID: UUID?
+    var suggestedRetentionRaw: String?
 
     init(
         id: UUID = UUID(), kind: MediaKind, source: MediaSource,
@@ -230,6 +246,9 @@ final class MediaItem {
         self.width = width
         self.height = height
         self.duration = duration
+        self.classificationStatusRaw = kind == .photo
+            ? SmartClassificationStatus.pending.rawValue
+            : SmartClassificationStatus.none.rawValue
     }
 
     var kind: MediaKind { MediaKind(rawValue: kindRaw) ?? .photo }
@@ -256,6 +275,18 @@ final class MediaItem {
     var primaryAction: PrimaryMediaAction {
         get { PrimaryMediaAction(rawValue: primaryActionRaw) ?? .automatic }
         set { primaryActionRaw = newValue.rawValue }
+    }
+    var classificationStatus: SmartClassificationStatus {
+        get { SmartClassificationStatus(rawValue: classificationStatusRaw) ?? .none }
+        set { classificationStatusRaw = newValue.rawValue }
+    }
+    var suggestedPurpose: CapturePurpose? {
+        get { suggestedPurposeRaw.flatMap(CapturePurpose.init(rawValue:)) }
+        set { suggestedPurposeRaw = newValue?.rawValue }
+    }
+    var suggestedRetention: RetentionPolicy? {
+        get { suggestedRetentionRaw.flatMap(RetentionPolicy.init(rawValue:)) }
+        set { suggestedRetentionRaw = newValue?.rawValue }
     }
     var detectedURLs: [String] {
         get { Self.decodeStrings(detectedURLsJSON) }
@@ -314,6 +345,8 @@ final class Album {
     var autoPins: Bool = false
     var primaryActionRaw: String = "automatic"
     var isBuiltIn: Bool = false
+    var smartRuleEnabled: Bool = false
+    var smartRuleKeywords: String = ""
 
     init(name: String, sortOrder: Int = 0, defaultRetention: RetentionPolicy = .forever) {
         self.id = UUID()
