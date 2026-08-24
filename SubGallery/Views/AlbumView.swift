@@ -68,7 +68,6 @@ struct AlbumView: View {
     @State private var showsRetentionSheet = false
     @State private var showsShareSheet = false
     @State private var showsFilesExporter = false
-    @State private var showsSlideshow = false
     @State private var deleteConfirmation = false
     @State private var photosSelection: [PhotosPickerItem] = []
     @State private var importError: String?
@@ -249,9 +248,6 @@ struct AlbumView: View {
         .fullScreenCover(item: $viewerItem) { item in
             MediaViewer(items: items, initialID: item.id, isRecentlyDeleted: isRecentlyDeleted)
         }
-        .fullScreenCover(isPresented: $showsSlideshow) {
-            SlideshowView(items: items)
-        }
         .sheet(isPresented: $showsMoveSheet) { albumPicker }
         .sheet(isPresented: $showsRetentionSheet) {
             BatchRetentionPickerView(items: selectedItems) {
@@ -329,10 +325,6 @@ struct AlbumView: View {
                 }
             }
             Divider()
-            Button { showsSlideshow = true } label: {
-                Label("슬라이드쇼", systemImage: "play.rectangle")
-            }
-            .disabled(items.isEmpty)
             if let album = userAlbum {
                 NavigationLink {
                     MediaMapView(albumID: album.id, albumName: album.name)

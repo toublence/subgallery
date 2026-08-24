@@ -109,6 +109,9 @@ struct SettingsView: View {
 
                 Section {
                     NavigationLink("사용 방법") { UsageGuideView() }
+                    Link(destination: URL(string: "https://apps.apple.com/app/id6804523282?action=write-review")!) {
+                        Label("응원하기", systemImage: "heart.fill")
+                    }
                     Button("앱 평가하기") { requestReview() }
                     Link("문의하기", destination: URL(string: "mailto:support@namslab.com")!)
                     Link("개인정보 처리방침", destination: URL(string: "https://namslab.com/privacy")!)
