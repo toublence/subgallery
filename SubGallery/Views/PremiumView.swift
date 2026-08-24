@@ -234,7 +234,7 @@ struct PremiumView: View {
             PremiumBenefitRow(
                 symbol: "tray.full.fill",
                 title: "정리할 사진만 모아서",
-                detail: "만료 예정, 완료 대기 사진을 한곳에서 빠르게 정리합니다."
+                detail: "만료 예정과 완료 대기 사진을 한곳에서 빠르게 정리합니다."
             )
             Divider().padding(.leading, 52)
             PremiumBenefitRow(
@@ -413,6 +413,18 @@ struct PremiumView: View {
     }
 }
 
+private extension Product {
+    /// App Store Connect 제품명은 한국어로만 등록되어 있어 앱 언어 설정을 따르지 않는다. 알려진 플랜은 직접 번역해 보여준다.
+    var localizedPlanName: String {
+        switch id {
+        case PurchaseManager.yearlyID: L10n.text("SubGallery Premium 연간")
+        case PurchaseManager.monthlyID: L10n.text("SubGallery Premium 월간")
+        case PurchaseManager.lifetimeID: L10n.text("SubGallery Premium 평생 이용권")
+        default: displayName
+        }
+    }
+}
+
 private extension View {
     func prominentPurchaseButton() -> some View {
         self
@@ -467,7 +479,7 @@ private struct YearlyProductCard: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 7) {
-                        Text(product.displayName)
+                        Text(product.localizedPlanName)
                             .font(.headline)
                             .foregroundStyle(.primary)
                         Text(L10n.text("추천"))
@@ -528,7 +540,7 @@ private struct SecondaryProductCard: View {
                         .font(.subheadline.bold())
                         .foregroundStyle(.primary)
                 }
-                Text(product.displayName)
+                Text(product.localizedPlanName)
                     .font(.subheadline.bold())
                     .foregroundStyle(.primary)
                     .lineLimit(2)
