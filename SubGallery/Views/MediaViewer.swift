@@ -458,8 +458,8 @@ private struct ViewerPage: View {
     var body: some View {
         Group {
             if item.kind == .video {
-                VideoPlayer(player: AVPlayer(url: MediaStorage.url(for: item.localPath)))
-            } else if let image = UIImage(contentsOfFile: MediaStorage.url(for: item.localPath).path) {
+                VideoPlayer(player: AVPlayer(url: item.mediaURL))
+            } else if let image = UIImage(contentsOfFile: item.mediaURL.path) {
                 Image(uiImage: image)
                     .resizable().scaledToFit().scaleEffect(scale)
                     .gesture(MagnifyGesture().onChanged { value in scale = min(max(lastScale * value.magnification, 1), 6) }

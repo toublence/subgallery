@@ -38,7 +38,7 @@ struct PhotoEditorView: View {
     @State private var errorMessage: String?
 
     private var sourceImage: UIImage? {
-        UIImage(contentsOfFile: MediaStorage.url(for: item.localPath).path)
+        UIImage(contentsOfFile: item.mediaURL.path)
     }
 
     var body: some View {

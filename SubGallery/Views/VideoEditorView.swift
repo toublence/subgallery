@@ -35,7 +35,7 @@ struct VideoEditorView: View {
         self.item = item
         self.onSaved = onSaved
         let duration = max(item.duration, 0.1)
-        _player = State(initialValue: AVPlayer(url: MediaStorage.url(for: item.localPath)))
+        _player = State(initialValue: AVPlayer(url: item.mediaURL))
         _trimStart = State(initialValue: 0)
         _trimEnd = State(initialValue: duration)
     }
@@ -144,7 +144,7 @@ struct VideoEditorView: View {
     }
 
     private func saveCopy() {
-        let source = MediaStorage.url(for: item.localPath)
+        let source = item.mediaURL
         let start = trimStart
         let end = trimEnd
         let shouldRemoveAudio = removesAudio

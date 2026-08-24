@@ -34,10 +34,10 @@ actor ReminderService {
         content.body = L10n.text("저장해둔 사진을 확인할 시간이에요.")
         content.sound = .default
         content.userInfo = ["mediaID": item.id.uuidString]
-        if let path = item.thumbnailPath,
+        if let thumbnailURL = item.thumbnailURL,
            let attachment = try? UNNotificationAttachment(
             identifier: "thumbnail",
-            url: MediaStorage.url(for: path)
+            url: thumbnailURL
            ) {
             content.attachments = [attachment]
         }

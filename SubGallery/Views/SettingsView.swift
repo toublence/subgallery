@@ -1,5 +1,5 @@
+import CloudKit
 import CoreLocation
-import LocalAuthentication
 import StoreKit
 import SwiftData
 import SwiftUI
@@ -10,10 +10,11 @@ struct SettingsView: View {
     @Query(sort: \Album.sortOrder) private var albums: [Album]
     @AppStorage("storage.defaultRetention") private var defaultRetention = RetentionPolicy.forever.rawValue
     @AppStorage("storage.defaultRetentionDate") private var defaultRetentionDate = 0.0
-    @AppStorage("privacy.biometricLock") private var biometricLock = false
+    @AppStorage("privacy.pinLock") private var pinLock = false
     @AppStorage("privacy.stripMetadata") private var stripsMetadata = false
     @AppStorage("privacy.appSwitcherProtection") private var appSwitcherProtection = true
     @AppStorage("icloud.sync") private var iCloudSync = false
+    @AppStorage("icloud.active") private var iCloudActive = false
     @AppStorage("icloud.syncStatus") private var iCloudStatus = "idle"
     @AppStorage("camera.saveLocation") private var savesLocation = false
     @AppStorage("app.language") private var appLanguage = AppLanguage.system.rawValue
@@ -24,9 +25,9 @@ struct SettingsView: View {
     @AppStorage("camera.destinationAlbumID") private var currentCameraDestination = StorageDestination.camera.token
     @StateObject private var locationPermission = LocationPermissionController()
     @State private var showsLocationSettingsAlert = false
-    @State private var biometryType: LABiometryType = .none
-    @State private var biometricsAvailable = false
-    @State private var biometricError: String?
+    @State private var showsPINSetup = false
+    @State private var showsPINVerification = false
+    @State private var iCloudError: String?
 
     private let retentionOptions: [RetentionPolicy] = [
         .forever, .untilComplete, .today, .oneDay, .sevenDays, .thirtyDays, .customDate
@@ -69,18 +70,20 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Toggle(biometricLockTitle, isOn: biometricLockToggle)
-                        .disabled(!biometricsAvailable && !biometricLock)
+                    Toggle(L10n.text("PIN 잠금"), isOn: pinLockToggle)
+                    if pinLock {
+                        Button(L10n.text("PIN 변경")) { showsPINSetup = true }
+                    }
                     Toggle(L10n.text("앱 전환기에서 가리기"), isOn: $appSwitcherProtection)
                     Toggle(L10n.text("내보낼 때 메타데이터 제거"), isOn: $stripsMetadata)
                 } header: {
                     Text(L10n.text("개인정보 보호"))
                 } footer: {
-                    Text(biometricPrivacyDescription + " " + L10n.text("메타데이터 제거를 켜면 Photos, Files와 공유로 내보낼 때 위치·기기·촬영 정보를 제거합니다."))
+                    Text(L10n.text("PIN 잠금을 사용하면 앱을 다시 열거나 다른 앱에서 돌아올 때 PIN을 입력해야 합니다.") + " " + L10n.text("메타데이터 제거를 켜면 Photos, Files와 공유로 내보낼 때 위치·기기·촬영 정보를 제거합니다."))
                 }
 
-                Section("iCloud") {
-                    Toggle(isOn: $iCloudSync) {
+                Section {
+                    Toggle(isOn: iCloudSyncToggle) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(L10n.text("iCloud 동기화"))
                             Text(iCloudStatusText)
@@ -88,6 +91,10 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                } header: {
+                    Text("iCloud")
+                } footer: {
+                    Text(L10n.text("사진과 동영상은 같은 Apple 계정으로 로그인한 기기 사이에서 동기화됩니다."))
                 }
 
                 Section(L10n.text("카메라")) {
@@ -144,7 +151,28 @@ struct SettingsView: View {
             }
             .onAppear {
                 validateDefaultDestinations()
-                updateBiometricAvailability()
+                refreshICloudAccountStatus()
+            }
+            .sheet(isPresented: $showsPINSetup) {
+                PINSetupView { saved in
+                    if saved { pinLock = true }
+                }
+            }
+            .sheet(isPresented: $showsPINVerification) {
+                PINVerificationView(title: L10n.text("PIN 잠금 해제")) { verified in
+                    if verified {
+                        PINCredentialStore.remove()
+                        pinLock = false
+                    }
+                }
+            }
+            .alert(L10n.text("iCloud를 사용할 수 없음"), isPresented: Binding(
+                get: { iCloudError != nil },
+                set: { if !$0 { iCloudError = nil } }
+            )) {
+                Button(L10n.text("확인"), role: .cancel) { }
+            } message: {
+                Text(iCloudError ?? L10n.text("iCloud 동기화를 확인해주세요."))
             }
             .alert(L10n.text("위치 접근이 필요합니다."), isPresented: $showsLocationSettingsAlert) {
                 Button(L10n.text("취소"), role: .cancel) { }
@@ -153,77 +181,20 @@ struct SettingsView: View {
                     UIApplication.shared.open(url)
                 }
             }
-            .alert(L10n.text("Touch ID를 사용할 수 없음"), isPresented: Binding(
-                get: { biometricError != nil },
-                set: { if !$0 { biometricError = nil } }
-            )) {
-                Button(L10n.text("확인"), role: .cancel) { }
-                Button(L10n.text("설정 열기")) {
-                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-                    UIApplication.shared.open(url)
-                }
-            } message: {
-                Text(biometricError ?? "Touch ID 설정을 확인해 주세요.")
-            }
         }
     }
 
-    private var biometricLockTitle: String {
-        L10n.text("Touch ID로 잠금")
-    }
-
-    private var biometricPrivacyDescription: String {
-        if biometricsAvailable || biometricLock {
-            return L10n.text("앱을 다시 열거나 다른 앱에서 돌아오면 인증 후 보관함을 표시합니다.")
-        }
-        return L10n.text("이 기기에서 사용할 수 있는 Touch ID가 없습니다.")
-    }
-
-    private var biometricLockToggle: Binding<Bool> {
+    private var pinLockToggle: Binding<Bool> {
         Binding(
-            get: { biometricLock },
+            get: { pinLock },
             set: { enabled in
                 if enabled {
-                    enableBiometricLock()
+                    showsPINSetup = true
                 } else {
-                    biometricLock = false
+                    showsPINVerification = true
                 }
             }
         )
-    }
-
-    private func updateBiometricAvailability() {
-        let context = LAContext()
-        var error: NSError?
-        biometricsAvailable = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
-            && context.biometryType == .touchID
-        biometryType = context.biometryType
-        if biometryType != .touchID { biometricLock = false }
-    }
-
-    private func enableBiometricLock() {
-        let context = LAContext()
-        context.localizedCancelTitle = L10n.text("취소")
-        var error: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error),
-              context.biometryType == .touchID else {
-            biometricLock = false
-            biometricError = error?.localizedDescription ?? L10n.text("Touch ID를 먼저 설정해 주세요.")
-            updateBiometricAvailability()
-            return
-        }
-        context.evaluatePolicy(
-            .deviceOwnerAuthenticationWithBiometrics,
-            localizedReason: L10n.text("Touch ID로 SubGallery의 비공개 보관함 잠금을 켭니다.")
-        ) { success, error in
-            DispatchQueue.main.async {
-                biometricLock = success
-                if !success {
-                    biometricError = error?.localizedDescription ?? L10n.text("Touch ID 인증에 실패했습니다.")
-                }
-                updateBiometricAvailability()
-            }
-        }
     }
 
     @ViewBuilder
@@ -275,9 +246,65 @@ struct SettingsView: View {
     private var iCloudStatusText: String {
         guard iCloudSync else { return L10n.text("현재 이 기기에만 저장됩니다.") }
         switch iCloudStatus {
+        case "checking": return L10n.text("iCloud 계정을 확인하는 중…")
         case "syncing": return L10n.text("iCloud 동기화 중…")
         case "error": return L10n.text("iCloud 동기화를 확인해주세요.")
         default: return L10n.text("iCloud에 동기화됩니다.")
+        }
+    }
+
+    private var iCloudSyncToggle: Binding<Bool> {
+        Binding(
+            get: { iCloudSync },
+            set: { enabled in
+                if enabled {
+                    enableICloudSync()
+                } else {
+                    iCloudSync = false
+                    iCloudStatus = iCloudActive ? "restartRequired" : "idle"
+                }
+            }
+        )
+    }
+
+    private func enableICloudSync() {
+        iCloudStatus = "checking"
+        Task {
+            do {
+                let status = try await CKContainer(
+                    identifier: DataStoreBootstrap.cloudContainerIdentifier
+                ).accountStatus()
+                guard status == .available else {
+                    iCloudSync = false
+                    iCloudStatus = "error"
+                    iCloudError = L10n.text("iCloud 동기화를 확인해주세요.")
+                    return
+                }
+                iCloudSync = true
+                iCloudStatus = "restartRequired"
+            } catch {
+                iCloudSync = false
+                iCloudStatus = "error"
+                iCloudError = error.localizedDescription
+            }
+        }
+    }
+
+    private func refreshICloudAccountStatus() {
+        guard iCloudSync else { return }
+        Task {
+            do {
+                let status = try await CKContainer(
+                    identifier: DataStoreBootstrap.cloudContainerIdentifier
+                ).accountStatus()
+                if iCloudSync != iCloudActive {
+                    iCloudStatus = "restartRequired"
+                } else {
+                    iCloudStatus = status == .available ? "ready" : "error"
+                }
+            } catch {
+                iCloudStatus = "error"
+            }
         }
     }
 

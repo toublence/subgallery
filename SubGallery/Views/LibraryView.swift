@@ -651,7 +651,7 @@ struct MediaThumbnail: View {
 
     var body: some View {
         Group {
-            if let path = item.thumbnailPath, let image = UIImage(contentsOfFile: MediaStorage.url(for: path).path) {
+            if let url = item.thumbnailURL, let image = UIImage(contentsOfFile: url.path) {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
                 Image(systemName: item.kind == .video ? "video.fill" : "photo.fill")

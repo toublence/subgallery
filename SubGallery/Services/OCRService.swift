@@ -149,7 +149,7 @@ actor OCRService {
             return
         }
         item.ocrStatus = .processing
-        let url = MediaStorage.url(for: item.localPath)
+        let url = item.mediaURL
 
         Task(priority: .utility) {
             do {

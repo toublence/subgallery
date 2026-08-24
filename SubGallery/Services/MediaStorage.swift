@@ -45,6 +45,25 @@ actor MediaStorage {
         rootURL.appending(path: relativePath)
     }
 
+    /// Restores a CloudKit-downloaded asset into the app's local media cache.
+    /// Existing local files always win so normal capture and editing stay fast.
+    nonisolated static func materializedURL(for relativePath: String, cloudData: Data?) -> URL {
+        let destination = url(for: relativePath)
+        guard !FileManager.default.fileExists(atPath: destination.path), let cloudData else {
+            return destination
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try cloudData.write(to: destination, options: .atomic)
+        } catch {
+            // Callers display their existing unavailable-file state if recovery fails.
+        }
+        return destination
+    }
+
     func store(data: Data, type: UTType?, preferredName: String? = nil) throws -> StoredMedia {
         try prepareDirectories()
         let kind: MediaKind = type?.conforms(to: .movie) == true ? .video : .photo

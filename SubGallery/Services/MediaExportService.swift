@@ -42,7 +42,7 @@ enum MediaExportService {
     static func preparedURLs(for items: [MediaItem], strippingMetadata: Bool) async throws -> [URL] {
         guard !items.isEmpty else { throw MediaExportError.noItems }
         guard strippingMetadata else {
-            return items.map { MediaStorage.url(for: $0.localPath) }
+            return items.map(\.mediaURL)
         }
 
         let directory = FileManager.default.temporaryDirectory
@@ -51,7 +51,7 @@ enum MediaExportService {
         do {
             var urls: [URL] = []
             for item in items {
-                let source = MediaStorage.url(for: item.localPath)
+                let source = item.mediaURL
                 if item.kind == .photo {
                     urls.append(try metadataFreePhoto(source: source, destinationDirectory: directory))
                 } else {

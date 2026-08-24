@@ -1,5 +1,8 @@
 import AppIntents
-import LocalAuthentication
+import CloudKit
+import CoreData
+import CryptoKit
+import Security
 import SwiftData
 import SwiftUI
 import UIKit
@@ -10,12 +13,55 @@ extension Notification.Name {
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    private var cloudEventObserver: NSObjectProtocol?
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        application.registerForRemoteNotifications()
+        cloudEventObserver = NotificationCenter.default.addObserver(
+            forName: NSPersistentCloudKitContainer.eventChangedNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            guard UserDefaults.standard.bool(forKey: "icloud.active"),
+                  let event = notification.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey]
+                    as? NSPersistentCloudKitContainer.Event else { return }
+            let eventType: String
+            switch event.type {
+            case .setup: eventType = "setup"
+            case .import: eventType = "import"
+            case .export: eventType = "export"
+            @unknown default: eventType = "unknown"
+            }
+            UserDefaults.standard.set(eventType, forKey: "icloud.lastEventType")
+            let status: String
+            if event.endDate == nil {
+                status = "syncing"
+            } else {
+                status = event.succeeded ? "ready" : "error"
+                if let error = event.error {
+                    let nsError = error as NSError
+                    let details = "\(nsError.domain) \(nsError.code): \(nsError.localizedDescription) \(nsError.userInfo)"
+                    UserDefaults.standard.set(details, forKey: "icloud.lastError")
+                    #if DEBUG
+                    print("CloudKit \(eventType) error: \(details)")
+                    #endif
+                } else {
+                    UserDefaults.standard.removeObject(forKey: "icloud.lastError")
+                }
+            }
+            UserDefaults.standard.set(status, forKey: "icloud.syncStatus")
+        }
         return true
+    }
+
+    deinit {
+        if let cloudEventObserver {
+            NotificationCenter.default.removeObserver(cloudEventObserver)
+        }
     }
 
     func userNotificationCenter(
@@ -48,8 +94,7 @@ struct SubGalleryApp: App {
     @State private var deepLink: MediaDeepLink?
     @State private var requestedLibraryDestination: AlbumDestination?
     @State private var didApplyInitialStartScreen = false
-    @State private var biometricErrorMessage: String?
-    @AppStorage("privacy.biometricLock") private var biometricLock = false
+    @AppStorage("privacy.pinLock") private var pinLock = false
     @AppStorage("privacy.appSwitcherProtection") private var appSwitcherProtection = true
     @AppStorage("app.language") private var appLanguageRaw = AppLanguage.system.rawValue
     @AppStorage("app.startScreen") private var startScreenRaw = AppStartScreen.library.rawValue
@@ -73,8 +118,8 @@ struct SubGalleryApp: App {
                         .allowsHitTesting(!obscuresContent)
                 }
 
-                if biometricLock && !isUnlocked {
-                    LockView(unlock: authenticate, errorMessage: biometricErrorMessage)
+                if pinLock && !isUnlocked {
+                    PINLockView(unlock: unlock)
                 }
             }
             .environment(\.locale, (AppLanguage(rawValue: appLanguageRaw) ?? .system).locale)
@@ -84,16 +129,16 @@ struct SubGalleryApp: App {
                     isCameraPresented = false
                 }
                 .overlay {
-                    if biometricLock && !isUnlocked {
-                        LockView(unlock: authenticate, errorMessage: biometricErrorMessage)
+                    if pinLock && !isUnlocked {
+                        PINLockView(unlock: unlock)
                     }
                 }
             }
             .fullScreenCover(item: $deepLink) { target in
                 ReminderDestinationView(mediaID: target.id)
                     .overlay {
-                        if biometricLock && !isUnlocked {
-                            LockView(unlock: authenticate, errorMessage: biometricErrorMessage)
+                        if pinLock && !isUnlocked {
+                            PINLockView(unlock: unlock)
                         }
                     }
             }
@@ -115,8 +160,14 @@ struct SubGalleryApp: App {
             .task {
                 #if DEBUG
                 await prepareUITestFixtureIfNeeded()
+                if ProcessInfo.processInfo.arguments.contains("-cloudkit-diagnostic") {
+                    await runCloudKitDiagnostic()
+                }
                 #endif
                 if dataStore.errorMessage == nil {
+                    if dataStore.usesCloudKit {
+                        await reconcileCloudMediaAssets()
+                    }
                     CapturePresetService.seedBuiltIns(in: dataStore.container.mainContext)
                     SharedInboxService.publishConfiguration(
                         albums: (try? dataStore.container.mainContext.fetch(FetchDescriptor<Album>())) ?? []
@@ -126,9 +177,11 @@ struct SubGalleryApp: App {
                     resumePendingOCR()
                 }
                 openPendingReminderIfNeeded()
-                if biometricLock {
-                    authenticate()
-                } else {
+                UserDefaults.standard.removeObject(forKey: "privacy.biometricLock")
+                if pinLock && !PINCredentialStore.hasPIN {
+                    pinLock = false
+                }
+                if !pinLock {
                     isUnlocked = true
                     applyInitialStartScreenIfNeeded()
                 }
@@ -144,14 +197,16 @@ struct SubGalleryApp: App {
                     openPendingReminderIfNeeded()
                     if dataStore.errorMessage == nil {
                         Task {
+                            if dataStore.usesCloudKit {
+                                await reconcileCloudMediaAssets()
+                            }
                             await SharedInboxService.ingestPendingItems(in: dataStore.container.mainContext)
                             await performExpirationSweep()
                         }
                     }
-                    if biometricLock && !isUnlocked { authenticate() }
                 case .inactive, .background:
                     obscuresContent = appSwitcherProtection
-                    if biometricLock { isUnlocked = false }
+                    if pinLock { isUnlocked = false }
                 @unknown default: break
                 }
             }
@@ -159,32 +214,12 @@ struct SubGalleryApp: App {
         .modelContainer(dataStore.container)
     }
 
-    private func authenticate() {
-        guard biometricLock else {
-            biometricErrorMessage = nil
-            isUnlocked = true
-            return
-        }
-        let context = LAContext()
-        context.localizedCancelTitle = L10n.text("취소")
-        var error: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error),
-              context.biometryType == .touchID else {
-            biometricLock = false
-            biometricErrorMessage = nil
-            isUnlocked = true
-            return
-        }
-        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: L10n.text("Touch ID로 보관함 잠금 해제")) { success, _ in
-            DispatchQueue.main.async {
-                isUnlocked = success
-                biometricErrorMessage = success ? nil : L10n.text("인증하지 않으면 비공개 보관함을 열 수 없습니다.")
-                if success {
-                    openPendingReminderIfNeeded()
-                    applyInitialStartScreenIfNeeded()
-                }
-            }
-        }
+    private func unlock(with pin: String) -> Bool {
+        guard PINCredentialStore.verify(pin) else { return false }
+        isUnlocked = true
+        openPendingReminderIfNeeded()
+        applyInitialStartScreenIfNeeded()
+        return true
     }
 
     private func applyInitialStartScreenIfNeeded() {
@@ -229,8 +264,41 @@ struct SubGalleryApp: App {
         }
     }
 
+    @MainActor
+    private func reconcileCloudMediaAssets() async {
+        let context = dataStore.container.mainContext
+        let items = (try? context.fetch(FetchDescriptor<MediaItem>())) ?? []
+        var changed = false
+
+        for item in items {
+            let localMediaURL = MediaStorage.url(for: item.localPath)
+            if item.cloudMediaData == nil,
+               FileManager.default.fileExists(atPath: localMediaURL.path),
+               let data = try? Data(contentsOf: localMediaURL, options: .mappedIfSafe) {
+                item.cloudMediaData = data
+                changed = true
+            } else if !FileManager.default.fileExists(atPath: localMediaURL.path) {
+                _ = item.mediaURL
+            }
+
+            if let thumbnailPath = item.thumbnailPath {
+                let localThumbnailURL = MediaStorage.url(for: thumbnailPath)
+                if item.cloudThumbnailData == nil,
+                   FileManager.default.fileExists(atPath: localThumbnailURL.path),
+                   let data = try? Data(contentsOf: localThumbnailURL, options: .mappedIfSafe) {
+                    item.cloudThumbnailData = data
+                    changed = true
+                } else if !FileManager.default.fileExists(atPath: localThumbnailURL.path) {
+                    _ = item.thumbnailURL
+                }
+            }
+            await Task.yield()
+        }
+        if changed { try? context.save() }
+    }
+
     private func openPendingReminderIfNeeded() {
-        guard (!biometricLock || isUnlocked),
+        guard (!pinLock || isUnlocked),
               !isCameraPresented,
               deepLink == nil,
               let rawID = UserDefaults.standard.string(forKey: "navigation.pendingMediaID"),
@@ -240,6 +308,20 @@ struct SubGalleryApp: App {
     }
 
     #if DEBUG
+    private func runCloudKitDiagnostic() async {
+        let database = CKContainer(identifier: DataStoreBootstrap.cloudContainerIdentifier).privateCloudDatabase
+        let record = CKRecord(recordType: "SubGalleryDiagnostic")
+        record["createdAt"] = Date.now as CKRecordValue
+        do {
+            let saved = try await database.save(record)
+            try await database.deleteRecord(withID: saved.recordID)
+            print("CloudKit direct diagnostic: success")
+        } catch {
+            let nsError = error as NSError
+            print("CloudKit direct diagnostic error: \(nsError.domain) \(nsError.code) \(nsError.userInfo)")
+        }
+    }
+
     @MainActor
     private func prepareUITestFixtureIfNeeded() async {
         let arguments = ProcessInfo.processInfo.arguments
@@ -313,12 +395,16 @@ private struct ReminderDestinationView: View {
     }
 }
 
-private struct DataStoreBootstrap {
+struct DataStoreBootstrap {
+    static let cloudContainerIdentifier = "iCloud.com.namslab.subgallery"
+
     let container: ModelContainer
     let errorMessage: String?
+    let usesCloudKit: Bool
 
     static func make() -> DataStoreBootstrap {
         let schema = Schema([MediaItem.self, Album.self, CapturePreset.self])
+        let cloudRequested = UserDefaults.standard.bool(forKey: "icloud.sync")
         do {
             let applicationSupport = FileManager.default.urls(
                 for: .applicationSupportDirectory,
@@ -333,11 +419,38 @@ private struct DataStoreBootstrap {
                 schema: schema,
                 url: applicationSupport.appending(path: "default.store"),
                 allowsSave: true,
-                cloudKitDatabase: .none
+                cloudKitDatabase: cloudRequested ? .private(cloudContainerIdentifier) : .none
             )
             let container = try ModelContainer(for: schema, configurations: [configuration])
-            return DataStoreBootstrap(container: container, errorMessage: nil)
+            UserDefaults.standard.set(cloudRequested, forKey: "icloud.active")
+            UserDefaults.standard.set(cloudRequested ? "ready" : "idle", forKey: "icloud.syncStatus")
+            return DataStoreBootstrap(container: container, errorMessage: nil, usesCloudKit: cloudRequested)
         } catch {
+            if cloudRequested {
+                UserDefaults.standard.set(error.localizedDescription, forKey: "icloud.lastError")
+                #if DEBUG
+                print("CloudKit store initialization error: \(error)")
+                #endif
+                do {
+                    let applicationSupport = FileManager.default.urls(
+                        for: .applicationSupportDirectory,
+                        in: .userDomainMask
+                    )[0]
+                    let localConfiguration = ModelConfiguration(
+                        "LocalLibrary",
+                        schema: schema,
+                        url: applicationSupport.appending(path: "default.store"),
+                        allowsSave: true,
+                        cloudKitDatabase: .none
+                    )
+                    let localContainer = try ModelContainer(for: schema, configurations: [localConfiguration])
+                    UserDefaults.standard.set(false, forKey: "icloud.active")
+                    UserDefaults.standard.set("error", forKey: "icloud.syncStatus")
+                    return DataStoreBootstrap(container: localContainer, errorMessage: nil, usesCloudKit: false)
+                } catch {
+                    // Continue to the recovery store below.
+                }
+            }
             // A temporary container lets SwiftUI render a useful recovery screen
             // instead of leaving the system launch screen visible indefinitely.
             let fallback = ModelConfiguration(
@@ -348,7 +461,13 @@ private struct DataStoreBootstrap {
             guard let container = try? ModelContainer(for: schema, configurations: [fallback]) else {
                 fatalError("Both persistent and recovery stores failed: \(error)")
             }
-            return DataStoreBootstrap(container: container, errorMessage: error.localizedDescription)
+            UserDefaults.standard.set(false, forKey: "icloud.active")
+            UserDefaults.standard.set("error", forKey: "icloud.syncStatus")
+            return DataStoreBootstrap(
+                container: container,
+                errorMessage: error.localizedDescription,
+                usesCloudKit: false
+            )
         }
     }
 }
@@ -366,32 +485,228 @@ private struct DataStoreErrorView: View {
     }
 }
 
-struct LockView: View {
-    let unlock: () -> Void
-    var errorMessage: String?
+enum PINCredentialStore {
+    private static let service = "com.namslab.subgallery.pin"
+    private static let account = "primary"
+
+    static var hasPIN: Bool { credentialData() != nil }
+
+    @discardableResult
+    static func set(_ pin: String) -> Bool {
+        guard pin.count == 4, pin.allSatisfy(\.isNumber) else { return false }
+        var salt = Data(count: 16)
+        let result = salt.withUnsafeMutableBytes {
+            SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!)
+        }
+        guard result == errSecSuccess else { return false }
+        let digest = Data(SHA256.hash(data: salt + Data(pin.utf8)))
+        let value = salt + digest
+        remove()
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecValueData as String: value
+        ]
+        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
+    }
+
+    static func verify(_ pin: String) -> Bool {
+        guard let value = credentialData(), value.count == 48 else { return false }
+        let salt = value.prefix(16)
+        let storedHash = value.suffix(32)
+        let enteredHash = Data(SHA256.hash(data: salt + Data(pin.utf8)))
+        return zip(storedHash, enteredHash).reduce(0) { $0 | ($1.0 ^ $1.1) } == 0
+    }
+
+    static func remove() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    private static func credentialData() -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
+        return result as? Data
+    }
+}
+
+struct PINLockView: View {
+    let unlock: (String) -> Bool
+    @State private var pin = ""
+    @State private var showsError = false
 
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "touchid")
-                .font(.system(size: 42, weight: .medium))
-                .foregroundStyle(.secondary)
-            Text(L10n.text("SubGallery가 잠겨 있습니다"))
-                .font(.title3.weight(.semibold))
-            Text(L10n.text("사진과 동영상은 인증 전까지 표시되지 않습니다."))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+        PINEntryPad(
+            title: L10n.text("PIN 입력"),
+            message: showsError
+                ? L10n.text("PIN이 올바르지 않습니다.")
+                : L10n.text("잠금을 해제하려면 PIN을 입력하세요."),
+            pin: $pin,
+            showsError: showsError
+        ) { enteredPIN in
+            if unlock(enteredPIN) {
+                showsError = false
+            } else {
+                showsError = true
+                pin = ""
             }
-            Button(L10n.text("Touch ID로 잠금 해제"), action: unlock)
-                .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.background)
         .privacySensitive()
+    }
+}
+
+struct PINSetupView: View {
+    @Environment(\.dismiss) private var dismiss
+    let completion: (Bool) -> Void
+    @State private var pin = ""
+    @State private var firstPIN: String?
+    @State private var showsError = false
+
+    var body: some View {
+        NavigationStack {
+            PINEntryPad(
+                title: L10n.text(firstPIN == nil ? "새 PIN 입력" : "PIN 다시 입력"),
+                message: showsError ? L10n.text("PIN이 일치하지 않습니다.") : L10n.text("4자리 PIN을 입력하세요."),
+                pin: $pin,
+                showsError: showsError
+            ) { enteredPIN in
+                if let firstPIN {
+                    guard firstPIN == enteredPIN else {
+                        self.firstPIN = nil
+                        pin = ""
+                        showsError = true
+                        return
+                    }
+                    let saved = PINCredentialStore.set(enteredPIN)
+                    completion(saved)
+                    dismiss()
+                } else {
+                    firstPIN = enteredPIN
+                    pin = ""
+                    showsError = false
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.text("취소")) {
+                        completion(false)
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct PINVerificationView: View {
+    @Environment(\.dismiss) private var dismiss
+    let title: String
+    let completion: (Bool) -> Void
+    @State private var pin = ""
+    @State private var showsError = false
+
+    var body: some View {
+        NavigationStack {
+            PINEntryPad(
+                title: title,
+                message: showsError ? L10n.text("PIN이 올바르지 않습니다.") : L10n.text("현재 PIN을 입력하세요."),
+                pin: $pin,
+                showsError: showsError
+            ) { enteredPIN in
+                guard PINCredentialStore.verify(enteredPIN) else {
+                    pin = ""
+                    showsError = true
+                    return
+                }
+                completion(true)
+                dismiss()
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.text("취소")) {
+                        completion(false)
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct PINEntryPad: View {
+    let title: String
+    let message: String
+    @Binding var pin: String
+    let showsError: Bool
+    let completion: (String) -> Void
+
+    private let rows = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"]]
+
+    var body: some View {
+        VStack(spacing: 22) {
+            Spacer()
+            Image(systemName: "lock.fill")
+                .font(.system(size: 38, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(title).font(.title2.weight(.semibold))
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(showsError ? .red : .secondary)
+                .multilineTextAlignment(.center)
+            HStack(spacing: 18) {
+                ForEach(0..<4, id: \.self) { index in
+                    Circle()
+                        .fill(index < pin.count ? Color.primary : Color.secondary.opacity(0.2))
+                        .frame(width: 14, height: 14)
+                }
+            }
+            .padding(.bottom, 18)
+            ForEach(rows, id: \.self) { row in
+                HStack(spacing: 36) {
+                    ForEach(row, id: \.self) { digit in digitButton(digit) }
+                }
+            }
+            HStack(spacing: 36) {
+                Color.clear.frame(width: 72, height: 58)
+                digitButton("0")
+                Button {
+                    if !pin.isEmpty { pin.removeLast() }
+                } label: {
+                    Image(systemName: "delete.left").font(.title2)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 72, height: 58)
+                .accessibilityLabel(L10n.text("지우기"))
+            }
+            Spacer()
+        }
+        .padding()
+    }
+
+    private func digitButton(_ digit: String) -> some View {
+        Button {
+            guard pin.count < 4 else { return }
+            pin.append(digit)
+            if pin.count == 4 { completion(pin) }
+        } label: {
+            Text(digit).font(.title.weight(.medium)).frame(width: 72, height: 58)
+        }
+        .buttonStyle(.plain)
     }
 }
 

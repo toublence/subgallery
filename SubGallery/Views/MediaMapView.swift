@@ -512,6 +512,7 @@ struct MediaMapView: View {
         var changed = false
         for item in media where item.deletedAt == nil && item.albumID == albumID && item.kind == .photo
             && (item.latitude == nil || item.longitude == nil) {
+            _ = item.mediaURL
             let metadata = await MediaStorage.shared.metadata(for: item.localPath)
             guard let latitude = metadata.latitude, let longitude = metadata.longitude else { continue }
             item.latitude = latitude

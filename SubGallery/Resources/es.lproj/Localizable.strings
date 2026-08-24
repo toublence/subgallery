@@ -10,3 +10,17 @@
 "만들기"="Crear";
 "보관 기한, 보안, 동기화를 제한 없이 사용하세요."="Usa la conservación, la privacidad y la sincronización sin límites."; "Temporary 자동 정리"="Limpieza temporal automática"; "Touch ID와 Fake PIN"="Touch ID y PIN falso"; "Capture Preset과 빠른 촬영"="Preajustes y captura rápida"; "개인정보 보호 내보내기"="Exportación privada";
 "상품을 불러올 수 없음"="No se pueden cargar los productos"; "App Store Connect에서 구독 상품을 설정해 주세요."="Configura los productos de suscripción en App Store Connect."; "구매 복원"="Restaurar compras"; "구매 시 Apple의 이용 약관과 개인정보 처리방침이 적용됩니다."="Se aplican las condiciones de uso y la política de privacidad de Apple."; "계속"="Continuar"; "추천"="Recomendado";
+"사진과 동영상은 같은 Apple 계정으로 로그인한 기기 사이에서 동기화됩니다."="Las fotos y los vídeos se sincronizan entre dispositivos con la misma cuenta de Apple."; "iCloud 설정을 적용하려면 앱을 완전히 종료한 뒤 다시 실행해 주세요."="Cierra por completo la app y vuelve a abrirla para aplicar el ajuste de iCloud."; "iCloud 계정을 확인하는 중…"="Comprobando tu cuenta de iCloud…"; "iCloud를 사용할 수 없음"="iCloud no disponible";
+"PIN 잠금" = "Bloqueo con PIN";
+"PIN 변경" = "Cambiar PIN";
+"PIN 잠금 해제" = "Desactivar bloqueo con PIN";
+"PIN 입력" = "Introducir PIN";
+"새 PIN 입력" = "Introducir PIN nuevo";
+"PIN 다시 입력" = "Volver a introducir el PIN";
+"4자리 PIN을 입력하세요." = "Introduce un PIN de 4 dígitos.";
+"현재 PIN을 입력하세요." = "Introduce tu PIN actual.";
+"잠금을 해제하려면 PIN을 입력하세요." = "Introduce tu PIN para desbloquear.";
+"PIN이 일치하지 않습니다." = "Los PIN no coinciden.";
+"PIN이 올바르지 않습니다." = "PIN incorrecto.";
+"PIN 잠금을 사용하면 앱을 다시 열거나 다른 앱에서 돌아올 때 PIN을 입력해야 합니다." = "Se solicitará el PIN al volver a abrir la app o regresar desde otra app.";
+"지우기" = "Borrar";
