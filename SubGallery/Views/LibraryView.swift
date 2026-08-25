@@ -97,13 +97,15 @@ struct LibraryView: View {
     #endif
 
     private var columns: [GridItem] {
-        let count = horizontalSizeClass == .compact ? 2 : 4
-        let spacing: CGFloat = horizontalSizeClass == .compact ? 10 : 18
+        let isPhone = UIDevice.current.userInterfaceIdiom == .phone
+        let count = isPhone ? 4 : (horizontalSizeClass == .compact ? 2 : 4)
+        let spacing: CGFloat = isPhone ? 8 : (horizontalSizeClass == .compact ? 10 : 18)
         return Array(repeating: GridItem(.flexible(), spacing: spacing), count: count)
     }
 
     private var albumGridSpacing: CGFloat {
-        horizontalSizeClass == .compact ? 16 : 24
+        if UIDevice.current.userInterfaceIdiom == .phone { return 12 }
+        return horizontalSizeClass == .compact ? 16 : 24
     }
 
     private var userAlbums: [Album] {
@@ -1202,8 +1204,10 @@ struct AlbumTile: View {
     var detail: String?
     var subtitle: String?
 
+    private var isPhone: Bool { UIDevice.current.userInterfaceIdiom == .phone }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: isPhone ? 5 : 8) {
             Rectangle()
                 .fill(.quaternary)
                 .aspectRatio(1, contentMode: .fit)
@@ -1214,18 +1218,19 @@ struct AlbumTile: View {
                             .clipped()
                     } else {
                         Image(systemName: symbol)
-                            .font(horizontalSizeClass == .compact ? .title2 : .largeTitle)
+                            .font(isPhone ? .title3 : (horizontalSizeClass == .compact ? .title2 : .largeTitle))
                             .foregroundStyle(.secondary)
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: isPhone ? 11 : 14, style: .continuous))
 
             Text(title)
-                .font(horizontalSizeClass == .compact ? .subheadline.bold() : .headline)
+                .font(isPhone ? .caption.bold() : (horizontalSizeClass == .compact ? .subheadline.bold() : .headline))
                 .lineLimit(1)
+                .minimumScaleFactor(isPhone ? 0.8 : 1)
             if let subtitle {
                 Text(subtitle)
-                    .font(horizontalSizeClass == .compact ? .caption : .subheadline)
+                    .font(isPhone ? .caption2 : (horizontalSizeClass == .compact ? .caption : .subheadline))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             } else {
@@ -1233,7 +1238,7 @@ struct AlbumTile: View {
                     Text(L10n.format("%d개", count)).foregroundStyle(.secondary)
                     if let detail { Text("· \(detail)").foregroundStyle(.orange).lineLimit(1) }
                 }
-                .font(horizontalSizeClass == .compact ? .caption : .subheadline)
+                .font(isPhone ? .caption2 : (horizontalSizeClass == .compact ? .caption : .subheadline))
             }
         }
         .contentShape(Rectangle())
