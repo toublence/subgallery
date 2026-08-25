@@ -352,6 +352,22 @@ final class CoreFeatureTests: XCTestCase {
         XCTAssertTrue(MediaViewerContentAccessPolicy.hasPremiumSmartContent(receipt))
     }
 
+    func testMediaViewerURLQRCodeDoesNotDuplicatePremiumURLAction() {
+        let item = MediaItem(kind: .photo, source: .files, localPath: "Media/url-qr.jpg")
+        item.detectedQRCodes = ["https://example.com"]
+        item.detectedURLs = ["https://example.com"]
+
+        XCTAssertTrue(MediaViewerContentAccessPolicy.premiumURLs(for: item).isEmpty)
+        XCTAssertFalse(MediaViewerContentAccessPolicy.hasPremiumSmartContent(item))
+
+        item.detectedURLs.append("https://subgallery.example/help")
+        XCTAssertEqual(
+            MediaViewerContentAccessPolicy.premiumURLs(for: item),
+            ["https://subgallery.example/help"]
+        )
+        XCTAssertTrue(MediaViewerContentAccessPolicy.hasPremiumSmartContent(item))
+    }
+
     func testDocumentPaywallCopyDoesNotClaimSearchablePDF() {
         let detail = PremiumFeatureCatalog.feature(.documentBuilder).detailKey
         XCTAssertFalse(detail.contains(["검색", "가능한", "PDF"].joined(separator: " ")))
@@ -383,6 +399,79 @@ final class CoreFeatureTests: XCTestCase {
             ))
         }
     }
+
+    func testReviewPromptPolicyCases1Through7() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let sevenDaysAgo = now.addingTimeInterval(-7 * 24 * 60 * 60)
+        let fifteenDaysAgo = now.addingTimeInterval(-15 * 24 * 60 * 60)
+
+        XCTAssertEqual(ReviewPromptPolicy.minimumSuccessfulSaves, 2)
+        XCTAssertEqual(ReviewPromptPolicy.minimumActiveDays, 1)
+        XCTAssertEqual(ReviewPromptPolicy.maximumRequestsPerVersion, 2)
+        XCTAssertEqual(ReviewPromptPolicy.requestCooldown, 14 * 24 * 60 * 60)
+
+        // CASE 1: one successful save is not enough.
+        XCTAssertFalse(ReviewPromptPolicy.isEligible(
+            onboardingCompleted: true, successfulSaveCount: 1, activeDayCount: 1,
+            requestsForCurrentVersion: 0, lastRequestedAt: nil, now: now
+        ))
+        // CASE 2: the second save on the first active day becomes eligible.
+        XCTAssertTrue(ReviewPromptPolicy.isEligible(
+            onboardingCompleted: true, successfulSaveCount: 2, activeDayCount: 1,
+            requestsForCurrentVersion: 0, lastRequestedAt: nil, now: now
+        ))
+        // CASE 3: launches without a successful save never qualify.
+        XCTAssertFalse(ReviewPromptPolicy.isEligible(
+            onboardingCompleted: true, successfulSaveCount: 0, activeDayCount: 30,
+            requestsForCurrentVersion: 0, lastRequestedAt: nil, now: now
+        ))
+        // CASE 4 and 5: seven days is blocked; fifteen days is eligible again.
+        XCTAssertFalse(ReviewPromptPolicy.isEligible(
+            onboardingCompleted: true, successfulSaveCount: 2, activeDayCount: 2,
+            requestsForCurrentVersion: 1, lastRequestedAt: sevenDaysAgo, now: now
+        ))
+        XCTAssertTrue(ReviewPromptPolicy.isEligible(
+            onboardingCompleted: true, successfulSaveCount: 2, activeDayCount: 2,
+            requestsForCurrentVersion: 1, lastRequestedAt: fifteenDaysAgo, now: now
+        ))
+        // CASE 6: the same version stops after two candidates.
+        XCTAssertFalse(ReviewPromptPolicy.isEligible(
+            onboardingCompleted: true, successfulSaveCount: 2, activeDayCount: 2,
+            requestsForCurrentVersion: 2, lastRequestedAt: fifteenDaysAgo, now: now
+        ))
+        // CASE 7: a version change receives a fresh allowance.
+        XCTAssertEqual(ReviewPromptPolicy.requestCountForCurrentVersion(
+            storedVersion: "1.0", currentVersion: "1.0", storedCount: 2
+        ), 2)
+        XCTAssertEqual(ReviewPromptPolicy.requestCountForCurrentVersion(
+            storedVersion: "1.0", currentVersion: "1.1", storedCount: 2
+        ), 0)
+    }
+
+    #if DEBUG
+    func testReviewPromptDebugForceCases8Through10DoNotMutateCounters() {
+        let defaults = UserDefaults.standard
+        let saves = defaults.integer(forKey: "review.successfulSaveCount")
+        let count = defaults.integer(forKey: "review.requestCountForVersion")
+        let lastDate = defaults.double(forKey: "review.lastRequestedDate")
+
+        XCTAssertTrue(ReviewPromptPolicy.shouldForceRequest(
+            arguments: ["SubGallery", "-force-review-prompt"], isStoreScreenshotMode: false
+        ))
+        XCTAssertFalse(ReviewPromptPolicy.shouldForceRequest(
+            arguments: ["SubGallery", "-force-review-prompt", "-store-screenshot"],
+            isStoreScreenshotMode: true
+        ))
+        XCTAssertFalse(ReviewPromptPolicy.shouldForceRequest(
+            arguments: ["SubGallery", "-force-review-prompt", "-ui-testing"],
+            isStoreScreenshotMode: false
+        ))
+
+        XCTAssertEqual(defaults.integer(forKey: "review.successfulSaveCount"), saves)
+        XCTAssertEqual(defaults.integer(forKey: "review.requestCountForVersion"), count)
+        XCTAssertEqual(defaults.double(forKey: "review.lastRequestedDate"), lastDate)
+    }
+    #endif
 
     func testPremiumBackfillUsesCompletedOCRForClassificationAndReceiptExtraction() async throws {
         let container = try makeContainer()

@@ -20,10 +20,21 @@ enum MediaViewerContentAccessPolicy {
     /// Receipt details and QR payloads are baseline features. Only OCR-derived
     /// follow-up actions that launch another app belong behind Premium.
     static func hasPremiumSmartContent(_ item: MediaItem) -> Bool {
-        !item.detectedURLs.isEmpty
+        !premiumURLs(for: item).isEmpty
             || !item.detectedPhoneNumbers.isEmpty
             || !item.detectedAddresses.isEmpty
             || !item.detectedDates.isEmpty
+    }
+
+    /// OCRService intentionally mirrors URL QR payloads into `detectedURLs` for
+    /// search. They already have a Free QR action, so they must not create a
+    /// second Premium URL action. URLs read from other text remain Premium.
+    static func premiumURLs(for item: MediaItem) -> [String] {
+        let qrURLs = Set(item.detectedQRCodes.compactMap(OCRService.httpURLString))
+        return item.detectedURLs.filter { value in
+            guard let normalized = OCRService.httpURLString(value) else { return true }
+            return !qrURLs.contains(normalized)
+        }
     }
 }
 
@@ -285,7 +296,7 @@ struct MediaViewer: View {
 
     @ViewBuilder
     private func premiumContentActions(for item: MediaItem) -> some View {
-        if let value = item.detectedURLs.first {
+        if let value = MediaViewerContentAccessPolicy.premiumURLs(for: item).first {
             Menu(L10n.text("URL")) {
                 Button { openURL(value, item: item, completeAfter: false) } label: { Label(L10n.text("Safari에서 열기"), systemImage: "safari") }
                 Button { openURL(value, item: item, completeAfter: true) } label: { Label(L10n.text("열고 완료"), systemImage: "checkmark.circle") }

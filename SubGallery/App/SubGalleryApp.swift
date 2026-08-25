@@ -61,10 +61,10 @@ enum ReviewPromptPolicy {
     // so this policy only decides which moments are worth spending an attempt on —
     // it is not the rate limit. Keeping it loose costs the user nothing, while a
     // dropped attempt still burns the cooldown, which is why the window is short.
-    private static let minimumSuccessfulSaves = 3
-    private static let minimumActiveDays = 2
-    private static let maximumRequestsPerVersion = 2
-    private static let requestCooldown: TimeInterval = 30 * 24 * 60 * 60
+    static let minimumSuccessfulSaves = 2
+    static let minimumActiveDays = 1
+    static let maximumRequestsPerVersion = 2
+    static let requestCooldown: TimeInterval = 14 * 24 * 60 * 60
 
     static func recordActiveDay() {
         guard isEligibleEnvironment else { return }
@@ -83,16 +83,49 @@ enum ReviewPromptPolicy {
     }
 
     static var shouldRequest: Bool {
-        guard isEligibleEnvironment,
-              UserDefaults.standard.bool(forKey: "onboarding.completed"),
-              UserDefaults.standard.integer(forKey: successfulSaveCountKey) >= minimumSuccessfulSaves,
-              storedActiveDays.count >= minimumActiveDays,
+        guard isEligibleEnvironment else { return false }
+        let lastRequest = UserDefaults.standard.double(forKey: lastRequestedDateKey)
+        return isEligible(
+            onboardingCompleted: UserDefaults.standard.bool(forKey: "onboarding.completed"),
+            successfulSaveCount: UserDefaults.standard.integer(forKey: successfulSaveCountKey),
+            activeDayCount: storedActiveDays.count,
+            requestsForCurrentVersion: requestsForCurrentVersion,
+            lastRequestedAt: lastRequest == 0 ? nil : Date(timeIntervalSince1970: lastRequest)
+        )
+    }
+
+    static func isEligible(
+        onboardingCompleted: Bool,
+        successfulSaveCount: Int,
+        activeDayCount: Int,
+        requestsForCurrentVersion: Int,
+        lastRequestedAt: Date?,
+        now: Date = .now
+    ) -> Bool {
+        guard onboardingCompleted,
+              successfulSaveCount >= minimumSuccessfulSaves,
+              activeDayCount >= minimumActiveDays,
               requestsForCurrentVersion < maximumRequestsPerVersion else {
             return false
         }
-        let lastRequest = UserDefaults.standard.double(forKey: lastRequestedDateKey)
-        return lastRequest == 0 || Date.now.timeIntervalSince1970 - lastRequest >= requestCooldown
+        guard let lastRequestedAt else { return true }
+        return now.timeIntervalSince(lastRequestedAt) >= requestCooldown
     }
+
+    #if DEBUG
+    static var shouldForceRequest: Bool {
+        shouldForceRequest(
+            arguments: ProcessInfo.processInfo.arguments,
+            isStoreScreenshotMode: StoreScreenshotMode.isEnabled
+        )
+    }
+
+    static func shouldForceRequest(arguments: [String], isStoreScreenshotMode: Bool) -> Bool {
+        arguments.contains("-force-review-prompt")
+            && !isStoreScreenshotMode
+            && !arguments.contains("-ui-testing")
+    }
+    #endif
 
     static func markRequested() {
         let defaults = UserDefaults.standard
@@ -108,10 +141,19 @@ enum ReviewPromptPolicy {
     /// Resets to zero on a version change, so a new release always starts with a
     /// fresh allowance.
     private static var requestsForCurrentVersion: Int {
-        guard UserDefaults.standard.string(forKey: lastRequestedVersionKey) == currentVersion else {
-            return 0
-        }
-        return UserDefaults.standard.integer(forKey: requestCountForVersionKey)
+        requestCountForCurrentVersion(
+            storedVersion: UserDefaults.standard.string(forKey: lastRequestedVersionKey),
+            currentVersion: currentVersion,
+            storedCount: UserDefaults.standard.integer(forKey: requestCountForVersionKey)
+        )
+    }
+
+    static func requestCountForCurrentVersion(
+        storedVersion: String?,
+        currentVersion: String,
+        storedCount: Int
+    ) -> Int {
+        storedVersion == currentVersion ? storedCount : 0
     }
 
     private static var storedActiveDays: [TimeInterval] {

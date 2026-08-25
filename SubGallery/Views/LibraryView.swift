@@ -92,6 +92,9 @@ struct LibraryView: View {
         }
     }()
     @State private var restoredLastDestination = false
+    #if DEBUG
+    @State private var didRequestForcedReview = false
+    #endif
 
     private var columns: [GridItem] {
         let count = horizontalSizeClass == .compact ? 2 : 4
@@ -240,7 +243,9 @@ struct LibraryView: View {
             }
             .onAppear {
                 restoreLastDestinationIfNeeded()
-                requestReviewIfAppropriate()
+                #if DEBUG
+                requestForcedReviewIfNeeded()
+                #endif
             }
             .onReceive(NotificationCenter.default.publisher(for: .smartClassificationSuggested)) { notification in
                 guard !isCameraPresented,
@@ -696,6 +701,17 @@ struct LibraryView: View {
             requestReview()
         }
     }
+
+    #if DEBUG
+    private func requestForcedReviewIfNeeded() {
+        guard ReviewPromptPolicy.shouldForceRequest, !didRequestForcedReview else { return }
+        didRequestForcedReview = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            requestReview()
+        }
+    }
+    #endif
 
     private func showAutomaticClassificationNotice(
         _ notice: SmartClassificationService.AutomaticClassificationNotice
