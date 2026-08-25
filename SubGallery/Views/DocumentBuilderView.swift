@@ -351,10 +351,12 @@ struct DocumentBuilderView: View {
 
     private func pdfFailureReason(_ error: Error) -> SubGalleryAnalytics.BuilderFailureReason {
         guard let error = error as? DocumentBuilderError else { return .unknown }
+        // Explicit returns: the `guard` above means the switch is not the function's
+        // only expression, so it is a statement and cannot infer the result type.
         switch error {
-        case .noPages: .invalidInput
-        case .renderFailed: .renderFailed
-        case .writeFailed: .saveFailed
+        case .noPages: return .invalidInput
+        case .renderFailed: return .renderFailed
+        case .writeFailed: return .saveFailed
         }
     }
 }

@@ -352,9 +352,11 @@ struct QRCodeBuilderView: View {
 
     private func qrFailureReason(_ error: Error) -> SubGalleryAnalytics.BuilderFailureReason {
         guard let error = error as? QRCodeBuilderError else { return .unknown }
+        // Explicit returns: the `guard` above means the switch is not the function's
+        // only expression, so it is a statement and cannot infer the result type.
         switch error {
-        case .invalidURL, .emptyValue, .invalidEmail, .invalidCoordinate: .invalidInput
-        case .renderFailed: .renderFailed
+        case .invalidURL, .emptyValue, .invalidEmail, .invalidCoordinate: return .invalidInput
+        case .renderFailed: return .renderFailed
         }
     }
 }
