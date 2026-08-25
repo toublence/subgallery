@@ -281,6 +281,15 @@ enum DocumentBuilderService {
         return fileName
     }
 
+    /// Removes the record and its files together so the viewer, the template list
+    /// and any future caller cannot drift apart on what "delete" means.
+    @MainActor
+    static func delete(_ document: Document, from context: ModelContext) {
+        remove(document)
+        context.delete(document)
+        try? context.save()
+    }
+
     static func remove(_ document: Document) {
         try? FileManager.default.removeItem(at: document.pdfURL)
         if let thumbnail = document.thumbnailURL {

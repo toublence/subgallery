@@ -416,7 +416,7 @@ struct AlbumView: View {
             PremiumView(entryPoint: .qrBuilder).presentationDetents([.large])
         }
         .sheet(item: $documentToOpen) { document in
-            DocumentViewerView(document: document)
+            PDFDocumentViewer(document: document)
         }
         .confirmationDialog(
             L10n.text("이 문서를 삭제할까요?"),
@@ -531,9 +531,7 @@ struct AlbumView: View {
     }
 
     private func delete(_ document: Document) {
-        DocumentBuilderService.remove(document)
-        modelContext.delete(document)
-        try? modelContext.save()
+        DocumentBuilderService.delete(document, from: modelContext)
     }
 
     private func qrCard(_ item: MediaItem) -> some View {

@@ -319,7 +319,7 @@ struct LibraryView: View {
             matching: .any(of: [.images, .videos])
         )
         .sheet(item: $documentToOpen) { document in
-            DocumentViewerView(document: document)
+            PDFDocumentViewer(document: document)
         }
         .sheet(isPresented: $showsSettings) {
             SettingsView().presentationDetents([.large])

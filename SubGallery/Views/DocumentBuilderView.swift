@@ -387,51 +387,7 @@ struct DocumentCompletionView: View {
                 }
             }
         }
-        .sheet(isPresented: $showsViewer) { DocumentViewerView(document: document) }
-        .sheet(isPresented: $showsShare) { ActivityShareSheet(urls: [document.pdfURL]) }
-        .sheet(isPresented: $showsFilesExporter) { FilesExportPicker(urls: [document.pdfURL]) }
-    }
-}
-
-// MARK: - Viewer
-
-struct DocumentViewerView: View {
-    @Environment(\.dismiss) private var dismiss
-    let document: Document
-
-    @State private var showsText = false
-    @State private var showsShare = false
-    @State private var showsFilesExporter = false
-
-    var body: some View {
-        NavigationStack {
-            PDFKitView(url: document.pdfURL)
-                .ignoresSafeArea(edges: .bottom)
-                .navigationTitle(document.title)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(L10n.text("닫기")) { dismiss() }
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Button(L10n.text("인식된 텍스트"), systemImage: "text.alignleft") {
-                                showsText = true
-                            }
-                            .disabled(document.recognizedText.isEmpty)
-                            Button(L10n.text("공유"), systemImage: "square.and.arrow.up") {
-                                showsShare = true
-                            }
-                            Button(L10n.text("파일에 저장"), systemImage: "folder") {
-                                showsFilesExporter = true
-                            }
-                        } label: {
-                            Label(L10n.text("문서 동작"), systemImage: "ellipsis.circle")
-                        }
-                    }
-                }
-        }
-        .sheet(isPresented: $showsText) { DocumentTextView(document: document) }
+        .sheet(isPresented: $showsViewer) { PDFDocumentViewer(document: document) }
         .sheet(isPresented: $showsShare) { ActivityShareSheet(urls: [document.pdfURL]) }
         .sheet(isPresented: $showsFilesExporter) { FilesExportPicker(urls: [document.pdfURL]) }
     }
@@ -477,26 +433,6 @@ struct DocumentTextView: View {
     }
 }
 
-/// PDFKit does the page navigation, zooming and in-document find for us; wrapping
-/// `PDFView` avoids rebuilding any of that.
-struct PDFKitView: UIViewRepresentable {
-    let url: URL
-
-    func makeUIView(context: Context) -> PDFView {
-        let view = PDFView()
-        view.autoScales = true
-        view.displayMode = .singlePageContinuous
-        view.displayDirection = .vertical
-        view.document = PDFDocument(url: url)
-        return view
-    }
-
-    func updateUIView(_ uiView: PDFView, context: Context) {
-        if uiView.document?.documentURL != url {
-            uiView.document = PDFDocument(url: url)
-        }
-    }
-}
 
 // MARK: - List card
 

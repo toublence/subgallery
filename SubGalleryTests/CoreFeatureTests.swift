@@ -709,6 +709,116 @@ final class CoreFeatureTests: XCTestCase {
         XCTAssertEqual(OCRService.qrPayload(symbology: .qr, payload: " hello "), "hello")
     }
 
+    // MARK: - PDF viewer
+
+    /// Writes a real PDF into the same location the builder uses, so the viewer is
+    /// exercised against a genuine file rather than a fixture.
+    private func writeTestPDF(pages: Int) throws -> Document {
+        let images = (0..<pages).map { index in
+            solidImage(index.isMultiple(of: 2) ? .white : .lightGray)
+        }
+        let data = try DocumentBuilderService.pdfData(from: images, title: "뷰어 테스트")
+        let directory = MediaStorage.url(for: DocumentBuilderService.directoryName)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let name = "viewer-\(UUID().uuidString).pdf"
+        try data.write(to: directory.appending(path: name), options: .atomic)
+        return Document(
+            title: "뷰어 테스트",
+            pageCount: pages,
+            pdfRelativePath: "\(DocumentBuilderService.directoryName)/\(name)"
+        )
+    }
+
+    func testPDFViewerCase1OpensTheRealFileAndReportsPages() throws {
+        let document = try writeTestPDF(pages: 2)
+        defer { DocumentBuilderService.remove(document) }
+
+        let model = PDFViewerModel()
+        model.load(url: document.pdfURL)
+
+        XCTAssertFalse(model.failedToOpen)
+        XCTAssertEqual(model.pageCount, 2)
+        XCTAssertEqual(model.currentPage, 1)
+        XCTAssertNotNil(model.pdfView.document, "the viewer must hold a real PDFDocument")
+        XCTAssertEqual(model.pdfView.displayMode, .singlePageContinuous)
+        XCTAssertTrue(model.pdfView.pageShadowsEnabled, "page separation is what makes it read as paper")
+        XCTAssertTrue(model.pdfView.autoScales)
+    }
+
+    func testPDFViewerCase4NavigatesToASelectedPage() throws {
+        let document = try writeTestPDF(pages: 4)
+        defer { DocumentBuilderService.remove(document) }
+
+        let model = PDFViewerModel()
+        model.load(url: document.pdfURL)
+        model.go(to: 3)
+
+        XCTAssertEqual(model.currentPage, 3)
+        let current = try XCTUnwrap(model.pdfView.currentPage)
+        XCTAssertEqual(model.pdfView.document?.index(for: current), 2)
+    }
+
+    func testPDFViewerCase7HandlesALongDocumentWithoutRenderingEveryPage() throws {
+        let document = try writeTestPDF(pages: 24)
+        defer { DocumentBuilderService.remove(document) }
+
+        let model = PDFViewerModel()
+        model.load(url: document.pdfURL)
+
+        XCTAssertEqual(model.pageCount, 24)
+        XCTAssertFalse(model.failedToOpen)
+        // Only the pages PDFKit chooses to draw are realised; nothing here builds a
+        // 24-image array up front.
+        XCTAssertNotNil(model.pdfView.document?.page(at: 23))
+        model.go(to: 24)
+        XCTAssertEqual(model.currentPage, 24)
+    }
+
+    func testPDFViewerReportsFailureInsteadOfFallingBackToImages() throws {
+        let directory = MediaStorage.url(for: DocumentBuilderService.directoryName)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let name = "broken-\(UUID().uuidString).pdf"
+        let url = directory.appending(path: name)
+        try Data("not a pdf".utf8).write(to: url, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let model = PDFViewerModel()
+        model.load(url: url)
+
+        XCTAssertTrue(model.failedToOpen)
+        XCTAssertEqual(model.pageCount, 0)
+        XCTAssertNil(model.pdfView.document)
+    }
+
+    func testPDFViewerCase5And6ShareTheCanonicalPDFFile() throws {
+        let document = try writeTestPDF(pages: 2)
+        defer { DocumentBuilderService.remove(document) }
+
+        // Share and Files both hand over this one URL — no regenerated file, no images.
+        let url = document.pdfURL
+        XCTAssertEqual(url.pathExtension, "pdf")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+
+        let type = try XCTUnwrap(url.resourceValues(forKeys: [.contentTypeKey]).contentType)
+        XCTAssertTrue(type.conforms(to: .pdf), "Files must recognise it as a PDF document")
+        XCTAssertNotNil(PDFDocument(url: url))
+    }
+
+    func testDeletingADocumentRemovesBothTheRecordAndTheFile() throws {
+        let container = try makeContainerWithDocuments()
+        let context = container.mainContext
+        let document = try writeTestPDF(pages: 1)
+        context.insert(document)
+        try context.save()
+        let url = document.pdfURL
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+
+        DocumentBuilderService.delete(document, from: context)
+
+        XCTAssertTrue(try context.fetch(FetchDescriptor<Document>()).isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
     // MARK: - QR builder
 
     /// Round-trips a generated payload back through the reader the app uses on real
