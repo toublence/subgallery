@@ -17,6 +17,37 @@ final class CoreFeatureTests: XCTestCase {
         case ordinary
     }
 
+    /// Vision needs an inference context that some simulator hosts cannot create.
+    /// Probing the real capability keeps these tests meaningful where Vision works
+    /// (device, macOS CI) instead of leaving a permanently red result where it does not.
+    private static var visionDetectsQRCodes: Bool = {
+        let filter = CIFilter(name: "CIQRCodeGenerator")
+        filter?.setValue(Data("probe".utf8), forKey: "inputMessage")
+        guard let raw = filter?.outputImage,
+              let cgSymbol = CIContext().createCGImage(raw, from: raw.extent) else { return false }
+        // Drawn on white with a quiet zone: a bare generator bitmap is not a fair
+        // probe of the detector, and a false negative here would silently skip a
+        // test that the host could actually run.
+        let side: CGFloat = 480
+        let canvas = CGSize(width: 720, height: 720)
+        let probe = UIGraphicsImageRenderer(size: canvas).image { renderer in
+            renderer.cgContext.interpolationQuality = .none
+            UIColor.white.setFill()
+            renderer.cgContext.fill(CGRect(origin: .zero, size: canvas))
+            renderer.cgContext.draw(
+                cgSymbol,
+                in: CGRect(x: (canvas.width - side) / 2, y: (canvas.height - side) / 2,
+                           width: side, height: side)
+            )
+        }
+        guard let cgProbe = probe.cgImage else { return false }
+        let request = VNDetectBarcodesRequest()
+        request.symbologies = [.qr]
+        let handler = VNImageRequestHandler(cgImage: cgProbe, orientation: .up, options: [:])
+        guard (try? handler.perform([request])) != nil else { return false }
+        return (request.results ?? []).contains { $0.symbology == .qr }
+    }()
+
     private func makeContainer() throws -> ModelContainer {
         let schema = Schema([MediaItem.self, Album.self, CapturePreset.self])
         let configuration = ModelConfiguration(
@@ -305,6 +336,10 @@ final class CoreFeatureTests: XCTestCase {
             localPath: "Media/legacy-receipt.jpg",
             albumID: album.id
         )
+        // This case covers template/preset migration, not analysis. Without this the
+        // backfill force-enqueues OCR for a file that does not exist and the detached
+        // task outlives the container, crashing the suite on teardown.
+        item.analysisEnabled = false
         context.insert(item)
 
         await PremiumBackfillService.run(in: context)
@@ -454,6 +489,10 @@ final class CoreFeatureTests: XCTestCase {
     }
 
     func testQRVisionPipelineCases1Through6() async throws {
+        try XCTSkipUnless(
+            Self.visionDetectsQRCodes,
+            "Vision cannot create an inference context on this host; run on a device or macOS."
+        )
         let cases: [(QRTestScene, Bool, String)] = [
             (.large, true, "CASE 1 large QR"),
             (.busy, true, "CASE 2 busy lottery-style QR"),
@@ -513,6 +552,58 @@ final class CoreFeatureTests: XCTestCase {
         XCTAssertEqual(templateItems.count, 4)
         XCTAssertEqual(templateItems.first?.id, newestQRItemID)
         XCTAssertTrue(try context.fetch(FetchDescriptor<Album>()).isEmpty)
+    }
+
+    func testRealtimeQRCaptureAppliesTemplateWithoutAlbumOrPremium() throws {
+        PurchaseManager.shared.configureForTesting(productIDs: [])
+        let container = try makeContainer()
+        let context = container.mainContext
+        let item = MediaItem(kind: .photo, source: .camera, localPath: "Media/live-qr.jpg")
+        context.insert(item)
+
+        let applied = SmartClassificationService.applyRealtimeQRCode(
+            "https://example.com/live",
+            to: item,
+            in: context
+        )
+
+        XCTAssertTrue(applied)
+        XCTAssertFalse(PremiumAccess.isActive)
+        XCTAssertEqual(item.templatePurpose, .qr)
+        XCTAssertEqual(item.classificationStatus, .applied)
+        XCTAssertFalse(item.isUnclassified)
+        XCTAssertNil(item.albumID)
+        XCTAssertEqual(item.detectedQRCodes, ["https://example.com/live"])
+        XCTAssertEqual(item.detectedURLs, ["https://example.com/live"])
+        XCTAssertTrue(try context.fetch(FetchDescriptor<Album>()).isEmpty)
+    }
+
+    func testRealtimeQRKeepsPayloadButDoesNotOverrideExplicitPreset() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let item = MediaItem(kind: .photo, source: .camera, localPath: "Media/live-receipt.jpg")
+        item.purpose = .receipt
+        context.insert(item)
+
+        let applied = SmartClassificationService.applyRealtimeQRCode("QR-PAYLOAD", to: item, in: context)
+
+        XCTAssertFalse(applied)
+        XCTAssertEqual(item.templatePurpose, .receipt)
+        XCTAssertEqual(item.detectedQRCodes, ["QR-PAYLOAD"])
+    }
+
+    func testVisionPassDoesNotErasePayloadFoundByLiveCapture() throws {
+        XCTAssertEqual(OCRService.merged(["live"], []), ["live"])
+        XCTAssertEqual(OCRService.merged(["live"], ["vision"]), ["live", "vision"])
+        XCTAssertEqual(OCRService.merged(["live"], ["live"]), ["live"])
+        XCTAssertEqual(OCRService.merged([], ["vision", "", "vision"]), ["vision"])
+    }
+
+    func testNonQRSymbologyIsNeverTreatedAsQRPayload() {
+        XCTAssertNil(OCRService.qrPayload(symbology: .code128, payload: "1234567890"))
+        XCTAssertNil(OCRService.qrPayload(symbology: .ean13, payload: "8801234567890"))
+        XCTAssertNil(OCRService.qrPayload(symbology: .qr, payload: "   "))
+        XCTAssertEqual(OCRService.qrPayload(symbology: .qr, payload: " hello "), "hello")
     }
 
     func testTemplateClassificationCase2LeavesOrdinaryPhotoUnclassified() throws {

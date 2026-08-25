@@ -116,12 +116,25 @@ actor OCRService {
     private func detectQRCodes(original: CIImage, enhanced: CIImage) -> [VNBarcodeObservation] {
         // CIImage applied the source EXIF orientation during loading, so each
         // normalized candidate is explicitly handed to Vision as upright.
-        let candidates = [original, enhanced, scaledForSmallQRCode(enhanced)]
+        // Ordered cheapest-first: most photos stop at the original.
+        let candidates = [
+            original,
+            enhanced,
+            scaledForSmallQRCode(original),
+            scaledForSmallQRCode(enhanced),
+            inverted(enhanced)
+        ]
         for candidate in candidates {
             let observations = performQRCodeRequest(on: candidate)
             if !observations.isEmpty { return observations }
         }
         return []
+    }
+
+    /// Light-on-dark QR codes — screens, stickers, printed inverses — survive the
+    /// contrast pass but read as background to the detector until inverted.
+    private func inverted(_ image: CIImage) -> CIImage {
+        image.applyingFilter("CIColorInvert")
     }
 
     private func performQRCodeRequest(on image: CIImage) -> [VNBarcodeObservation] {
@@ -202,10 +215,21 @@ actor OCRService {
     }
 
     private func normalizedURLString(_ value: String) -> String? {
+        Self.httpURLString(value)
+    }
+
+    nonisolated static func httpURLString(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
               ["http", "https"].contains(scheme) else { return nil }
         return url.absoluteString
+    }
+
+    /// Appends without disturbing existing order and without duplicating, so a
+    /// live-capture payload survives a later Vision pass that missed the code.
+    nonisolated static func merged(_ existing: [String], _ found: [String]) -> [String] {
+        var seen = Set(existing)
+        return existing + found.filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 
     private func receiptMerchant(in lines: [String]) -> String {
@@ -269,11 +293,11 @@ actor OCRService {
             do {
                 let result = try await OCRService.shared.analyze(at: url)
                 item.recognizedText = result.text
-                item.detectedURLs = result.urls
+                item.detectedURLs = OCRService.merged(item.detectedURLs, result.urls)
                 item.detectedPhoneNumbers = result.phoneNumbers
                 item.detectedAddresses = result.addresses
                 item.detectedDates = result.dates
-                item.detectedQRCodes = result.qrCodes
+                item.detectedQRCodes = OCRService.merged(item.detectedQRCodes, result.qrCodes)
                 SmartClassificationService.evaluate(
                     result,
                     for: item,
@@ -478,6 +502,34 @@ enum SmartClassificationService {
         }
     }
 
+    /// Classification from the live camera feed, before any Vision pass runs.
+    /// An `AVCaptureMetadataOutput` QR observation is as trustworthy as a Vision
+    /// one, so this applies the template outright instead of suggesting it.
+    @discardableResult
+    static func applyRealtimeQRCode(
+        _ payload: String,
+        to item: MediaItem,
+        in context: ModelContext
+    ) -> Bool {
+        let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, item.deletedAt == nil else { return false }
+
+        item.detectedQRCodes = OCRService.merged(item.detectedQRCodes, [trimmed])
+        if let url = OCRService.httpURLString(trimmed) {
+            item.detectedURLs = OCRService.merged(item.detectedURLs, [url])
+        }
+
+        // An explicit preset or destination is the user's own decision and outranks
+        // the automatic template; the payload is still kept on the item.
+        guard item.albumID == nil, item.purpose == .general else {
+            try? context.save()
+            return false
+        }
+
+        applyAutomatically(.qr, result: nil, to: item, in: context, postsNotification: true)
+        return true
+    }
+
     @discardableResult
     static func undoAutomaticClassification(itemID: UUID, in context: ModelContext) -> Bool {
         let items = (try? context.fetch(FetchDescriptor<MediaItem>())) ?? []
@@ -584,7 +636,7 @@ enum SmartClassificationService {
 
     private static func applyAutomatically(
         _ purpose: CapturePurpose,
-        result: MediaAnalysisResult,
+        result: MediaAnalysisResult?,
         to item: MediaItem,
         in context: ModelContext,
         postsNotification: Bool
@@ -611,7 +663,7 @@ enum SmartClassificationService {
         item.suggestedAlbumID = nil
         item.suggestedRetention = nil
         item.classificationStatus = .applied
-        if purpose == .receipt {
+        if purpose == .receipt, let result {
             if item.receiptMerchant.isEmpty { item.receiptMerchant = result.receiptMerchant }
             if item.receiptAmount.isEmpty { item.receiptAmount = result.receiptAmount }
             if item.receiptDate == nil { item.receiptDate = result.dates.first }

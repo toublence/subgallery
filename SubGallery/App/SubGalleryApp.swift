@@ -56,9 +56,15 @@ enum ReviewPromptPolicy {
     private static let activeDaysKey = "review.activeDays"
     private static let lastRequestedVersionKey = "review.lastRequestedVersion"
     private static let lastRequestedDateKey = "review.lastRequestedDate"
-    private static let minimumSuccessfulSaves = 5
-    private static let minimumActiveDays = 3
-    private static let requestCooldown: TimeInterval = 60 * 24 * 60 * 60
+    private static let requestCountForVersionKey = "review.requestCountForVersion"
+    // iOS itself shows at most three prompts per year and silently drops the rest,
+    // so this policy only decides which moments are worth spending an attempt on —
+    // it is not the rate limit. Keeping it loose costs the user nothing, while a
+    // dropped attempt still burns the cooldown, which is why the window is short.
+    private static let minimumSuccessfulSaves = 3
+    private static let minimumActiveDays = 2
+    private static let maximumRequestsPerVersion = 2
+    private static let requestCooldown: TimeInterval = 30 * 24 * 60 * 60
 
     static func recordActiveDay() {
         guard isEligibleEnvironment else { return }
@@ -81,7 +87,7 @@ enum ReviewPromptPolicy {
               UserDefaults.standard.bool(forKey: "onboarding.completed"),
               UserDefaults.standard.integer(forKey: successfulSaveCountKey) >= minimumSuccessfulSaves,
               storedActiveDays.count >= minimumActiveDays,
-              UserDefaults.standard.string(forKey: lastRequestedVersionKey) != currentVersion else {
+              requestsForCurrentVersion < maximumRequestsPerVersion else {
             return false
         }
         let lastRequest = UserDefaults.standard.double(forKey: lastRequestedDateKey)
@@ -90,9 +96,22 @@ enum ReviewPromptPolicy {
 
     static func markRequested() {
         let defaults = UserDefaults.standard
+        // Read the tally before stamping the version, otherwise the first request
+        // on a new version would immediately look like a repeat.
+        let count = requestsForCurrentVersion + 1
         defaults.set(currentVersion, forKey: lastRequestedVersionKey)
+        defaults.set(count, forKey: requestCountForVersionKey)
         defaults.set(Date.now.timeIntervalSince1970, forKey: lastRequestedDateKey)
         defaults.set(0, forKey: successfulSaveCountKey)
+    }
+
+    /// Resets to zero on a version change, so a new release always starts with a
+    /// fresh allowance.
+    private static var requestsForCurrentVersion: Int {
+        guard UserDefaults.standard.string(forKey: lastRequestedVersionKey) == currentVersion else {
+            return 0
+        }
+        return UserDefaults.standard.integer(forKey: requestCountForVersionKey)
     }
 
     private static var storedActiveDays: [TimeInterval] {

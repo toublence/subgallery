@@ -36,18 +36,29 @@ final class CameraController: NSObject, ObservableObject {
     @Published var availableVideoOptions: [CameraVideoOption] = []
     @Published var selectedVideoOption: CameraVideoOption?
     @Published var needsMicrophoneSettings = false
+    @Published private(set) var detectedQRCode: String?
+    @Published private(set) var isQRCodeDetected = false
 
     var onPhoto: ((Data) -> Void)?
     var onVideo: ((URL) -> Void)?
     var preferredLensID: String?
     var preferredZoomFactor: CGFloat = 1
 
+    /// A live QR badge that vanishes on a single dropped frame reads as flicker,
+    /// so the detection is held briefly after the code leaves the frame.
+    private static let qrRetentionInterval: TimeInterval = 1.2
+
     private let queue = DispatchQueue(label: "com.namslab.subgallery.camera")
+    private let metadataQueue = DispatchQueue(label: "com.namslab.subgallery.camera.metadata")
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
+    private let metadataOutput = AVCaptureMetadataOutput()
     private var currentInput: AVCaptureDeviceInput?
     private var audioInput: AVCaptureDeviceInput?
     private var timer: Timer?
+    private var qrClearWorkItem: DispatchWorkItem?
+    private var qrPayloadAtCapture: String?
+    private var subjectAreaObserver: NSObjectProtocol?
 
     func requestAndStart() {
         switch authorization {
@@ -64,6 +75,7 @@ final class CameraController: NSObject, ObservableObject {
     }
 
     func stop() {
+        clearRealtimeQRCode()
         queue.async { [session] in
             if session.isRunning { session.stopRunning() }
         }
@@ -95,6 +107,7 @@ final class CameraController: NSObject, ObservableObject {
                     self.publishCapabilities(for: device)
                 }
                 self.session.commitConfiguration()
+                self.configureContinuousFocus(for: device)
             } catch { self.session.commitConfiguration() }
         }
     }
@@ -213,12 +226,16 @@ final class CameraController: NSObject, ObservableObject {
             if self.session.canAddInput(input) { self.session.addInput(input); self.currentInput = input }
             if self.session.canAddOutput(self.photoOutput) { self.session.addOutput(self.photoOutput) }
             if self.session.canAddOutput(self.movieOutput) { self.session.addOutput(self.movieOutput) }
+            let addedMetadataOutput = self.session.canAddOutput(self.metadataOutput)
+            if addedMetadataOutput { self.session.addOutput(self.metadataOutput) }
             let zoom = min(max(1, self.preferredZoomFactor), device.activeFormat.videoMaxZoomFactor)
             if (try? device.lockForConfiguration()) != nil {
                 device.videoZoomFactor = zoom
                 device.unlockForConfiguration()
             }
             self.session.commitConfiguration()
+            self.configureContinuousFocus(for: device)
+            if addedMetadataOutput { self.startQRCodeDetection() }
             self.session.startRunning()
             DispatchQueue.main.async {
                 self.availableLenses = lenses
@@ -231,9 +248,101 @@ final class CameraController: NSObject, ObservableObject {
     }
 
     private func capturePhoto() {
+        // Sampled at the shutter, not when the photo arrives: the code may leave
+        // the frame during processing, and the user pressed the button while it
+        // was still there.
+        qrPayloadAtCapture = detectedQRCode
         let settings = AVCapturePhotoSettings()
         if currentInput?.device.hasFlash == true { settings.flashMode = flashMode }
         photoOutput.capturePhoto(with: settings, delegate: self)
+    }
+
+    /// Returns the QR payload that was on screen when the shutter fired, and
+    /// clears it so a later capture cannot inherit it.
+    func consumeQRPayloadAtCapture() -> String? {
+        defer { qrPayloadAtCapture = nil }
+        return qrPayloadAtCapture
+    }
+
+    /// Called after `commitConfiguration`: `availableMetadataObjectTypes` is only
+    /// reliably populated once the output is connected, and assigning a type the
+    /// output does not advertise raises an exception rather than failing softly.
+    /// Without this the capture device keeps whatever focus mode it started with,
+    /// so a close subject — a receipt, a ticket, a QR code — never comes into
+    /// focus, and both the live metadata scanner and the post-capture Vision pass
+    /// are handed a blurred code they cannot decode.
+    private func configureContinuousFocus(for device: AVCaptureDevice) {
+        guard (try? device.lockForConfiguration()) != nil else { return }
+        if device.isFocusModeSupported(.continuousAutoFocus) {
+            device.focusMode = .continuousAutoFocus
+        }
+        if device.isSmoothAutoFocusSupported {
+            device.isSmoothAutoFocusEnabled = true
+        }
+        if device.isExposureModeSupported(.continuousAutoExposure) {
+            device.exposureMode = .continuousAutoExposure
+        }
+        // Tap-to-focus is one-shot and locks the lens. Watching the subject area
+        // lets the camera recover on its own once the framing changes, instead of
+        // staying focused at the tapped distance forever.
+        device.isSubjectAreaChangeMonitoringEnabled = true
+        device.unlockForConfiguration()
+        observeSubjectAreaChanges(for: device)
+    }
+
+    private func observeSubjectAreaChanges(for device: AVCaptureDevice) {
+        if let subjectAreaObserver { NotificationCenter.default.removeObserver(subjectAreaObserver) }
+        subjectAreaObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureDevice.subjectAreaDidChangeNotification,
+            object: device,
+            queue: nil
+        ) { [weak self, weak device] _ in
+            guard let self, let device else { return }
+            self.queue.async {
+                guard (try? device.lockForConfiguration()) != nil else { return }
+                if device.isFocusModeSupported(.continuousAutoFocus) {
+                    device.focusMode = .continuousAutoFocus
+                }
+                if device.isExposureModeSupported(.continuousAutoExposure) {
+                    device.exposureMode = .continuousAutoExposure
+                }
+                device.unlockForConfiguration()
+            }
+        }
+    }
+
+    private func startQRCodeDetection() {
+        guard metadataOutput.availableMetadataObjectTypes.contains(.qr) else { return }
+        metadataOutput.setMetadataObjectsDelegate(self, queue: metadataQueue)
+        metadataOutput.metadataObjectTypes = [.qr]
+    }
+
+    private func handleRealtimeQRCode(_ payload: String?) {
+        qrClearWorkItem?.cancel()
+        qrClearWorkItem = nil
+
+        if let payload {
+            if detectedQRCode != payload { detectedQRCode = payload }
+            if !isQRCodeDetected { isQRCodeDetected = true }
+            return
+        }
+
+        guard isQRCodeDetected else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.isQRCodeDetected = false
+            self.detectedQRCode = nil
+            self.qrClearWorkItem = nil
+        }
+        qrClearWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.qrRetentionInterval, execute: work)
+    }
+
+    private func clearRealtimeQRCode() {
+        qrClearWorkItem?.cancel()
+        qrClearWorkItem = nil
+        isQRCodeDetected = false
+        detectedQRCode = nil
     }
 
     private func toggleRecording() {
@@ -360,6 +469,24 @@ extension CameraController: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         guard error == nil, let data = photo.fileDataRepresentation() else { return }
         DispatchQueue.main.async { self.onPhoto?(data) }
+    }
+}
+
+extension CameraController: AVCaptureMetadataOutputObjectsDelegate {
+    func metadataOutput(
+        _ output: AVCaptureMetadataOutput,
+        didOutput metadataObjects: [AVMetadataObject],
+        from connection: AVCaptureConnection
+    ) {
+        let payload = metadataObjects
+            .compactMap { $0 as? AVMetadataMachineReadableCodeObject }
+            .first { $0.type == .qr }
+            .flatMap { object -> String? in
+                guard let value = object.stringValue?
+                    .trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+                return value
+            }
+        DispatchQueue.main.async { [weak self] in self?.handleRealtimeQRCode(payload) }
     }
 }
 

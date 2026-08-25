@@ -240,6 +240,8 @@ struct CameraView: View {
             .font(.title3)
             .padding(.horizontal, 20).padding(.top, 8)
 
+            if showsQRCodeBadge { qrCodeBadge.padding(.top, 12) }
+
             Spacer()
 
             if camera.isRecording {
@@ -302,6 +304,25 @@ struct CameraView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
+    }
+
+    /// Video capture has no QR pipeline, and the badge would be misleading while
+    /// recording, so the hint is limited to photo mode.
+    private var showsQRCodeBadge: Bool {
+        camera.mode == .photo && !camera.isRecording && camera.isQRCodeDetected
+    }
+
+    private var qrCodeBadge: some View {
+        Label(L10n.text("QR 감지됨"), systemImage: "qrcode.viewfinder")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(.black.opacity(0.55), in: Capsule())
+            .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 1))
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .animation(.easeOut(duration: 0.2), value: camera.isQRCodeDetected)
+            .accessibilityLabel(L10n.text("QR 코드를 감지했습니다. 촬영하면 QR 템플릿으로 분류됩니다."))
     }
 
     private var purposeMenu: some View {
@@ -499,10 +520,11 @@ struct CameraView: View {
     }
 
     private func storePhoto(_ data: Data) {
+        let qrPayload = camera.consumeQRPayloadAtCapture()
         Task {
             let output = croppedPhotoData(data) ?? data
             guard let stored = try? await MediaStorage.shared.store(data: output, type: .jpeg) else { return }
-            await insert(stored)
+            await insert(stored, realtimeQRPayload: qrPayload)
         }
     }
 
@@ -549,7 +571,7 @@ struct CameraView: View {
     }
 
     @MainActor
-    private func insert(_ stored: StoredMedia) {
+    private func insert(_ stored: StoredMedia, realtimeQRPayload: String? = nil) {
         let item = MediaItem(
             kind: stored.kind, source: .camera, localPath: stored.relativePath,
             thumbnailPath: stored.thumbnailRelativePath, fileName: stored.fileName,
@@ -575,6 +597,13 @@ struct CameraView: View {
         modelContext.insert(item)
         try? modelContext.save()
         ReviewPromptPolicy.recordSuccessfulSave()
+        if let realtimeQRPayload {
+            SmartClassificationService.applyRealtimeQRCode(
+                realtimeQRPayload,
+                to: item,
+                in: modelContext
+            )
+        }
         OCRService.enqueue(item, in: modelContext)
         lastCapture = item
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
