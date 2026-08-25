@@ -209,6 +209,7 @@ final class MediaItem {
     var suggestedPurposeRaw: String?
     var suggestedAlbumID: UUID?
     var suggestedRetentionRaw: String?
+    var premiumAnalysisVersion: Int = 0
 
     init(
         id: UUID = UUID(), kind: MediaKind, source: MediaSource,

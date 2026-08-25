@@ -314,7 +314,7 @@ struct SettingsView: View {
                 let status = try await CKContainer(
                     identifier: DataStoreBootstrap.cloudContainerIdentifier
                 ).accountStatus()
-                guard status == .available else {
+                guard purchases.isPremium, status == .available else {
                     iCloudSync = false
                     iCloudStatus = "error"
                     iCloudError = L10n.text("iCloud 동기화를 확인해주세요.")
@@ -331,7 +331,7 @@ struct SettingsView: View {
     }
 
     private func refreshICloudAccountStatus() {
-        guard iCloudSync else { return }
+        guard purchases.isPremium, iCloudSync else { return }
         Task {
             do {
                 let status = try await CKContainer(

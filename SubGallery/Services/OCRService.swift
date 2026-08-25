@@ -13,7 +13,7 @@ struct MediaAnalysisResult: Sendable {
     let receiptMerchant: String
     let receiptAmount: String
     let textLineCount: Int
-    let textCoverage: Double
+    let textCoverage: Double?
 }
 
 actor OCRService {
@@ -67,6 +67,25 @@ actor OCRService {
             receiptAmount: receiptAmount(in: lines),
             textLineCount: lines.count,
             textCoverage: textCoverage
+        )
+    }
+
+    func analyzeStoredText(_ text: String) -> MediaAnalysisResult {
+        let lines = text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let detected = detectData(in: text)
+        return MediaAnalysisResult(
+            text: text,
+            urls: detected.urls,
+            phoneNumbers: detected.phoneNumbers,
+            addresses: detected.addresses,
+            dates: detected.dates,
+            qrCodes: [],
+            receiptMerchant: receiptMerchant(in: lines),
+            receiptAmount: receiptAmount(in: lines),
+            textLineCount: lines.count,
+            textCoverage: nil
         )
     }
 
@@ -151,7 +170,12 @@ actor OCRService {
     }
 
     @MainActor
-    static func enqueue(_ item: MediaItem, in context: ModelContext, force: Bool = false) {
+    static func enqueue(
+        _ item: MediaItem,
+        in context: ModelContext,
+        force: Bool = false,
+        postsSuggestionNotification: Bool = true
+    ) {
         guard item.kind == .photo, item.analysisEnabled,
               force || item.ocrStatus == .pending else {
             if !item.analysisEnabled { item.ocrStatus = .notApplicable }
@@ -170,7 +194,12 @@ actor OCRService {
                 item.detectedDates = result.dates
                 item.detectedQRCodes = result.qrCodes
                 if PremiumAccess.isActive {
-                    SmartClassificationService.evaluate(result, for: item, in: context)
+                    SmartClassificationService.evaluate(
+                        result,
+                        for: item,
+                        in: context,
+                        postsSuggestionNotification: postsSuggestionNotification
+                    )
                     let isReceipt = item.purpose == .receipt
                         || item.suggestedPurpose == .receipt
                         || SmartClassificationService.isHighConfidenceReceipt(result, text: result.text)
@@ -179,6 +208,7 @@ actor OCRService {
                         if item.receiptAmount.isEmpty { item.receiptAmount = result.receiptAmount }
                         if item.receiptDate == nil { item.receiptDate = result.dates.first }
                     }
+                    item.premiumAnalysisVersion = PremiumBackfillService.currentVersion
                 }
                 item.ocrStatus = .completed
             } catch {
@@ -189,9 +219,80 @@ actor OCRService {
     }
 }
 
+struct PremiumBackfillResult: Equatable {
+    var analyzedFromStoredText = 0
+    var enqueuedForOCR = 0
+}
+
+@MainActor
+enum PremiumBackfillService {
+    static let currentVersion = 1
+
+    @discardableResult
+    static func run(in context: ModelContext) async -> PremiumBackfillResult {
+        guard PremiumAccess.isActive else { return PremiumBackfillResult() }
+
+        CapturePresetService.upgradePremiumTemplates(in: context)
+        let items = (try? context.fetch(FetchDescriptor<MediaItem>())) ?? []
+        var summary = PremiumBackfillResult()
+
+        for item in items where needsPremiumAnalysis(item) {
+            guard item.kind == .photo, item.deletedAt == nil, item.analysisEnabled else { continue }
+            let storedText = item.recognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !storedText.isEmpty else {
+                OCRService.enqueue(
+                    item,
+                    in: context,
+                    force: true,
+                    postsSuggestionNotification: false
+                )
+                summary.enqueuedForOCR += 1
+                await Task.yield()
+                continue
+            }
+
+            let result = await OCRService.shared.analyzeStoredText(item.recognizedText)
+            if item.classificationStatus == .none {
+                item.classificationStatus = .pending
+            }
+            if item.classificationStatus == .pending {
+                SmartClassificationService.evaluate(
+                    result,
+                    for: item,
+                    in: context,
+                    postsSuggestionNotification: false
+                )
+            }
+            let isReceipt = item.purpose == .receipt
+                || item.suggestedPurpose == .receipt
+                || SmartClassificationService.isHighConfidenceReceipt(result, text: result.text)
+            if isReceipt {
+                if item.receiptMerchant.isEmpty { item.receiptMerchant = result.receiptMerchant }
+                if item.receiptAmount.isEmpty { item.receiptAmount = result.receiptAmount }
+                if item.receiptDate == nil { item.receiptDate = result.dates.first }
+            }
+            item.premiumAnalysisVersion = currentVersion
+            summary.analyzedFromStoredText += 1
+            await Task.yield()
+        }
+        try? context.save()
+        return summary
+    }
+
+    private static func needsPremiumAnalysis(_ item: MediaItem) -> Bool {
+        item.premiumAnalysisVersion < currentVersion
+            || item.classificationStatus == .pending
+    }
+}
+
 @MainActor
 enum SmartClassificationService {
-    static func evaluate(_ result: MediaAnalysisResult, for item: MediaItem, in context: ModelContext) {
+    static func evaluate(
+        _ result: MediaAnalysisResult,
+        for item: MediaItem,
+        in context: ModelContext,
+        postsSuggestionNotification: Bool = true
+    ) {
         guard PremiumAccess.isActive,
               item.deletedAt == nil,
               item.classificationStatus == .pending else { return }
@@ -242,7 +343,9 @@ enum SmartClassificationService {
         item.suggestedRetention = retention
         item.classificationStatus = .suggested
         try? context.save()
-        NotificationCenter.default.post(name: .smartClassificationSuggested, object: item.id)
+        if postsSuggestionNotification {
+            NotificationCenter.default.post(name: .smartClassificationSuggested, object: item.id)
+        }
     }
 
     static func apply(
@@ -286,9 +389,10 @@ enum SmartClassificationService {
     }
 
     private static func isHighConfidenceDocument(_ result: MediaAnalysisResult) -> Bool {
-        result.textLineCount >= 8
+        guard let textCoverage = result.textCoverage else { return false }
+        return result.textLineCount >= 8
             && result.text.count >= 160
-            && result.textCoverage >= 0.12
+            && textCoverage >= 0.12
     }
 }
 

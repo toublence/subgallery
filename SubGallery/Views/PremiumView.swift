@@ -3,12 +3,18 @@ import SwiftUI
 
 enum PremiumAccess {
     private static let entitlementKey = "premium.active"
+    private static var verifiedActive: Bool?
 
     static var isActive: Bool {
+        verifiedActive == true
+    }
+
+    static var cachedIsActive: Bool {
         UserDefaults.standard.bool(forKey: entitlementKey)
     }
 
-    static func update(isActive: Bool) {
+    static func updateVerified(isActive: Bool) {
+        verifiedActive = isActive
         let defaults = UserDefaults.standard
         defaults.set(isActive, forKey: entitlementKey)
         guard !isActive else { return }
@@ -20,6 +26,12 @@ enum PremiumAccess {
             forKey: "icloud.syncStatus"
         )
     }
+
+    #if DEBUG
+    static func configureForTesting(isActive: Bool) {
+        updateVerified(isActive: isActive)
+    }
+    #endif
 }
 
 @MainActor
@@ -97,6 +109,9 @@ final class PurchaseManager: ObservableObject {
                 }
                 await transaction.finish()
                 await refreshEntitlements()
+                if isPremium {
+                    NotificationCenter.default.post(name: .premiumBackfillRequested, object: nil)
+                }
                 message = L10n.text("구매가 완료되었습니다.")
             case .pending:
                 message = L10n.text("구매 승인 대기 중입니다.")
@@ -118,6 +133,9 @@ final class PurchaseManager: ObservableObject {
         do {
             try await AppStore.sync()
             await refreshEntitlements()
+            if isPremium {
+                NotificationCenter.default.post(name: .premiumBackfillRequested, object: nil)
+            }
             message = isPremium
                 ? L10n.text("구매가 복원되었습니다.")
                 : L10n.text("복원할 구매가 없습니다.")
@@ -127,6 +145,7 @@ final class PurchaseManager: ObservableObject {
     }
 
     func refreshEntitlements() async {
+        let wasPremium = PremiumAccess.isActive
         var activeIDs: Set<String> = []
         for await result in Transaction.currentEntitlements {
             guard case .verified(let transaction) = result,
@@ -134,8 +153,30 @@ final class PurchaseManager: ObservableObject {
             activeIDs.insert(transaction.productID)
         }
         purchasedProductIDs = activeIDs
-        PremiumAccess.update(isActive: isPremium)
+        PremiumAccess.updateVerified(isActive: isPremium)
+        if wasPremium != isPremium {
+            NotificationCenter.default.post(
+                name: .premiumEntitlementDidChange,
+                object: nil,
+                userInfo: ["isActive": isPremium]
+            )
+        }
     }
+
+    #if DEBUG
+    func configureForTesting(productIDs: Set<String>) {
+        let wasPremium = PremiumAccess.isActive
+        purchasedProductIDs = productIDs.intersection(Set(Self.productIDs))
+        PremiumAccess.configureForTesting(isActive: isPremium)
+        if wasPremium != isPremium {
+            NotificationCenter.default.post(
+                name: .premiumEntitlementDidChange,
+                object: nil,
+                userInfo: ["isActive": isPremium]
+            )
+        }
+    }
+    #endif
 }
 
 struct PremiumView: View {

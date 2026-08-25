@@ -16,6 +16,11 @@ final class CoreFeatureTests: XCTestCase {
         return try ModelContainer(for: schema, configurations: [configuration])
     }
 
+    override func setUp() {
+        super.setUp()
+        PurchaseManager.shared.configureForTesting(productIDs: [])
+    }
+
     func testUntilCompletePersistsCompletesAndRestores() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "retention-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -97,5 +102,106 @@ final class CoreFeatureTests: XCTestCase {
         for option in ReminderDateOption.allCases {
             XCTAssertGreaterThan(option.date(from: now), now, option.title)
         }
+    }
+
+    func testFreeUserCannotRunPremiumBackfillOrUsePremiumPreset() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let album = Album(name: "Receipt", defaultRetention: .thirtyDays)
+        album.purpose = .receipt
+        album.isBuiltIn = true
+        context.insert(album)
+        let preset = CapturePreset(name: "Receipt", albumID: album.id)
+        preset.purpose = .receipt
+        context.insert(preset)
+
+        let result = await PremiumBackfillService.run(in: context)
+
+        XCTAssertEqual(result, PremiumBackfillResult())
+        XCTAssertFalse(album.smartRuleEnabled)
+        XCTAssertFalse(CapturePresetService.canUse(preset))
+    }
+
+    func testPremiumBackfillUsesCompletedOCRForClassificationAndReceiptExtraction() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        PurchaseManager.shared.configureForTesting(productIDs: [PurchaseManager.yearlyID])
+        let item = MediaItem(kind: .photo, source: .files, localPath: "Media/receipt.jpg")
+        item.ocrStatus = .completed
+        item.recognizedText = "Coffee Shop\nRECEIPT\n2026-08-20\nTOTAL $12.34"
+        context.insert(item)
+
+        let result = await PremiumBackfillService.run(in: context)
+
+        XCTAssertEqual(result.analyzedFromStoredText, 1)
+        XCTAssertEqual(result.enqueuedForOCR, 0)
+        XCTAssertEqual(item.suggestedPurpose, .receipt)
+        XCTAssertEqual(item.classificationStatus, .suggested)
+        XCTAssertFalse(item.receiptMerchant.isEmpty)
+        XCTAssertFalse(item.receiptAmount.isEmpty)
+        XCTAssertEqual(item.premiumAnalysisVersion, PremiumBackfillService.currentVersion)
+    }
+
+    func testPremiumBackfillUpgradesTemplateAndDoesNotDuplicatePreset() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        PurchaseManager.shared.configureForTesting(productIDs: [PurchaseManager.monthlyID])
+        let album = Album(name: "Receipt", defaultRetention: .thirtyDays)
+        album.purpose = .receipt
+        album.isBuiltIn = true
+        context.insert(album)
+
+        await PremiumBackfillService.run(in: context)
+        await PremiumBackfillService.run(in: context)
+        let presets = try context.fetch(FetchDescriptor<CapturePreset>())
+
+        XCTAssertTrue(album.smartRuleEnabled)
+        XCTAssertEqual(presets.filter { $0.isBuiltIn && $0.purpose == .receipt }.count, 1)
+    }
+
+    func testExistingTemplateGetsMissingPresetWhenAddedAgain() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        PurchaseManager.shared.configureForTesting(productIDs: [PurchaseManager.yearlyID])
+        let album = Album(name: "Document")
+        album.purpose = .document
+        album.isBuiltIn = true
+        context.insert(album)
+
+        let returned = CapturePresetService.addTemplate(.document, in: context)
+        let presets = try context.fetch(FetchDescriptor<CapturePreset>())
+
+        XCTAssertEqual(returned.id, album.id)
+        XCTAssertTrue(album.smartRuleEnabled)
+        XCTAssertEqual(presets.filter { $0.purpose == .document }.count, 1)
+    }
+
+    func testSubscriptionExpirationPreservesButLocksPresetAndCloudSync() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let preset = CapturePreset(name: "Premium preset")
+        preset.purpose = .custom
+        context.insert(preset)
+        PurchaseManager.shared.configureForTesting(productIDs: [PurchaseManager.monthlyID])
+        XCTAssertTrue(CapturePresetService.canUse(preset))
+        XCTAssertTrue(DataStoreBootstrap.shouldUseCloudKit(premiumActive: true, syncRequested: true))
+
+        PurchaseManager.shared.configureForTesting(productIDs: [])
+
+        XCTAssertEqual(try context.fetch(FetchDescriptor<CapturePreset>()).count, 1)
+        XCTAssertFalse(CapturePresetService.canUse(preset))
+        XCTAssertFalse(DataStoreBootstrap.shouldUseCloudKit(premiumActive: false, syncRequested: true))
+    }
+
+    func testLifetimeAndRestoredVerifiedProductsKeepPremiumActive() {
+        PurchaseManager.shared.configureForTesting(productIDs: [PurchaseManager.lifetimeID])
+        XCTAssertTrue(PurchaseManager.shared.isPremium)
+        XCTAssertTrue(PremiumAccess.isActive)
+
+        PurchaseManager.shared.configureForTesting(productIDs: [])
+        XCTAssertFalse(PremiumAccess.isActive)
+        PurchaseManager.shared.configureForTesting(productIDs: [PurchaseManager.yearlyID])
+        XCTAssertTrue(PurchaseManager.shared.isPremium)
+        XCTAssertTrue(PremiumAccess.isActive)
     }
 }

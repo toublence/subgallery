@@ -35,6 +35,21 @@ schemes:
       config: Debug
     archive:
       config: Release
+  SubGallery-StoreKit:
+    build:
+      targets:
+        SubGallery: all
+    run:
+      config: Debug
+      language: ko
+      region: KR
+      storeKitConfiguration: StoreKit/Products.storekit
+    test:
+      config: Debug
+      targets:
+        - SubGalleryTests
+    analyze:
+      config: Debug
 targets:
   SubGallery:
     type: application

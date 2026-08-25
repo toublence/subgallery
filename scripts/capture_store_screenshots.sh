@@ -54,7 +54,7 @@ capture_device() {
     local launched=false
     for attempt in 1 2 3; do
       if xcrun simctl launch "$udid" "$BUNDLE_ID" \
-        -store-screenshot -store-screen "$screen" \
+        -store-screenshot -store-premium -store-screen "$screen" \
         -app.language "$app_language" \
         -AppleLanguages "($apple_language)" \
         -AppleLocale "$apple_locale" >/dev/null 2>&1; then

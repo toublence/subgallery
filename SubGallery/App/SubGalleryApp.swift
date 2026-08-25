@@ -15,10 +15,16 @@ extension Notification.Name {
     static let openReminderMedia = Notification.Name("openReminderMedia")
     static let replayOnboarding = Notification.Name("replayOnboarding")
     static let smartClassificationSuggested = Notification.Name("smartClassificationSuggested")
+    static let premiumEntitlementDidChange = Notification.Name("premiumEntitlementDidChange")
+    static let premiumBackfillRequested = Notification.Name("premiumBackfillRequested")
 }
 
 enum StoreScreenshotMode {
+    #if DEBUG
     static let isEnabled = ProcessInfo.processInfo.arguments.contains("-store-screenshot")
+    #else
+    static let isEnabled = false
+    #endif
 
     static var screen: String {
         let arguments = ProcessInfo.processInfo.arguments
@@ -122,7 +128,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             object: nil,
             queue: .main
         ) { notification in
-            guard UserDefaults.standard.bool(forKey: "icloud.active"),
+            guard PremiumAccess.isActive,
+                  UserDefaults.standard.bool(forKey: "icloud.active"),
                   let event = notification.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey]
                     as? NSPersistentCloudKitContainer.Event else { return }
             let eventType: String
@@ -203,7 +210,7 @@ struct SubGalleryApp: App {
     @AppStorage("camera.destinationAlbumID") private var currentCameraDestination = StorageDestination.camera.token
     @AppStorage("onboarding.completed") private var onboardingCompleted = false
 
-    private let dataStore = DataStoreBootstrap.make()
+    private let dataStore = DataStoreBootstrap.make(premiumActive: PremiumAccess.cachedIsActive)
 
     var body: some Scene {
         WindowGroup {
@@ -283,8 +290,25 @@ struct SubGalleryApp: App {
             .onReceive(NotificationCenter.default.publisher(for: .replayOnboarding)) { _ in
                 showsOnboarding = true
             }
+            .onReceive(NotificationCenter.default.publisher(for: .premiumEntitlementDidChange)) { notification in
+                guard let isActive = notification.userInfo?["isActive"] as? Bool else { return }
+                Task { await handlePremiumEntitlementChange(isActive: isActive) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .premiumBackfillRequested)) { _ in
+                Task {
+                    guard PurchaseManager.shared.isPremium, dataStore.errorMessage == nil else { return }
+                    await PremiumBackfillService.run(in: dataStore.container.mainContext)
+                }
+            }
             .task {
                 if StoreScreenshotMode.isEnabled {
+                    #if DEBUG
+                    PurchaseManager.shared.configureForTesting(
+                        productIDs: ProcessInfo.processInfo.arguments.contains("-store-premium")
+                            ? [PurchaseManager.lifetimeID]
+                            : []
+                    )
+                    #endif
                     isUnlocked = true
                     CapturePresetService.seedBuiltIns(in: dataStore.container.mainContext)
                     await prepareStoreScreenshotFixture()
@@ -293,6 +317,7 @@ struct SubGalleryApp: App {
                 }
                 ReviewPromptPolicy.recordActiveDay()
                 await PurchaseManager.shared.refreshEntitlements()
+                updateCloudKitSessionStatus()
                 #if DEBUG
                 await prepareUITestFixtureIfNeeded()
                 if ProcessInfo.processInfo.arguments.contains("-cloudkit-diagnostic") {
@@ -304,6 +329,9 @@ struct SubGalleryApp: App {
                         await reconcileCloudMediaAssets()
                     }
                     CapturePresetService.seedBuiltIns(in: dataStore.container.mainContext)
+                    if PurchaseManager.shared.isPremium {
+                        await PremiumBackfillService.run(in: dataStore.container.mainContext)
+                    }
                     SharedInboxService.publishConfiguration(
                         albums: (try? dataStore.container.mainContext.fetch(FetchDescriptor<Album>())) ?? []
                     )
@@ -333,7 +361,9 @@ struct SubGalleryApp: App {
                     openPendingReminderIfNeeded()
                     if dataStore.errorMessage == nil {
                         Task {
-                            if dataStore.usesCloudKit {
+                            await PurchaseManager.shared.refreshEntitlements()
+                            updateCloudKitSessionStatus()
+                            if PurchaseManager.shared.isPremium && dataStore.usesCloudKit {
                                 await reconcileCloudMediaAssets()
                             }
                             await SharedInboxService.ingestPendingItems(in: dataStore.container.mainContext)
@@ -348,6 +378,23 @@ struct SubGalleryApp: App {
             }
         }
         .modelContainer(dataStore.container)
+    }
+
+    @MainActor
+    private func handlePremiumEntitlementChange(isActive: Bool) async {
+        updateCloudKitSessionStatus()
+        guard isActive, dataStore.errorMessage == nil else { return }
+        await PremiumBackfillService.run(in: dataStore.container.mainContext)
+    }
+
+    @MainActor
+    private func updateCloudKitSessionStatus() {
+        let shouldUseCloudKit = DataStoreBootstrap.shouldUseCloudKit(
+            premiumActive: PurchaseManager.shared.isPremium,
+            syncRequested: UserDefaults.standard.bool(forKey: "icloud.sync")
+        )
+        guard dataStore.usesCloudKit != shouldUseCloudKit else { return }
+        UserDefaults.standard.set("restartRequired", forKey: "icloud.syncStatus")
     }
 
     private func unlock(with pin: String) -> Bool {
@@ -574,6 +621,7 @@ struct SubGalleryApp: App {
 
     @MainActor
     private func reconcileCloudMediaAssets() async {
+        guard PremiumAccess.isActive, dataStore.usesCloudKit else { return }
         let context = dataStore.container.mainContext
         let items = (try? context.fetch(FetchDescriptor<MediaItem>())) ?? []
         var changed = false
@@ -617,6 +665,7 @@ struct SubGalleryApp: App {
 
     #if DEBUG
     private func runCloudKitDiagnostic() async {
+        guard PremiumAccess.isActive else { return }
         let database = CKContainer(identifier: DataStoreBootstrap.cloudContainerIdentifier).privateCloudDatabase
         let record = CKRecord(recordType: "SubGalleryDiagnostic")
         record["createdAt"] = Date.now as CKRecordValue
@@ -728,15 +777,21 @@ struct DataStoreBootstrap {
     let errorMessage: String?
     let usesCloudKit: Bool
 
-    static func make() -> DataStoreBootstrap {
+    static func shouldUseCloudKit(premiumActive: Bool, syncRequested: Bool) -> Bool {
+        premiumActive && syncRequested
+    }
+
+    static func make(premiumActive: Bool) -> DataStoreBootstrap {
         let schema = Schema([MediaItem.self, Album.self, CapturePreset.self])
         if StoreScreenshotMode.isEnabled {
             let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
             let container = try! ModelContainer(for: schema, configurations: [configuration])
             return DataStoreBootstrap(container: container, errorMessage: nil, usesCloudKit: false)
         }
-        let cloudRequested = PremiumAccess.isActive
-            && UserDefaults.standard.bool(forKey: "icloud.sync")
+        let cloudRequested = shouldUseCloudKit(
+            premiumActive: premiumActive,
+            syncRequested: UserDefaults.standard.bool(forKey: "icloud.sync")
+        )
         do {
             let applicationSupport = FileManager.default.urls(
                 for: .applicationSupportDirectory,

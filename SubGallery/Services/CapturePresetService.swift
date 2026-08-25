@@ -3,10 +3,7 @@ import SwiftData
 @MainActor
 enum CapturePresetService {
     static func seedBuiltIns(in context: ModelContext) {
-        let albums = (try? context.fetch(FetchDescriptor<Album>())) ?? []
         let presets = (try? context.fetch(FetchDescriptor<CapturePreset>())) ?? []
-
-        migrateUnusedLegacyTemplates(albums: albums, presets: presets, in: context)
 
         ensurePreset(named: L10n.text("일반"), purpose: .general, album: nil, retention: .forever,
                      ocrEnabled: true, savesLocation: false, autoPins: false, primaryAction: .automatic,
@@ -14,12 +11,21 @@ enum CapturePresetService {
         try? context.save()
     }
 
-    static let templatePurposes: [CapturePurpose] = [.receipt, .parking, .document, .qr, .temporary]
+    static let templatePurposes: [CapturePurpose] = [.receipt, .travel, .parking, .document]
+    private static let premiumTemplatePurposes: [CapturePurpose] = [
+        .receipt, .travel, .parking, .document, .qr, .temporary
+    ]
 
     @discardableResult
     static func addTemplate(_ purpose: CapturePurpose, in context: ModelContext) -> Album {
         let albums = (try? context.fetch(FetchDescriptor<Album>())) ?? []
-        if let existing = albums.first(where: { $0.purpose == purpose }) { return existing }
+        if let existing = albums.first(where: { $0.purpose == purpose }) {
+            if PremiumAccess.isActive, existing.isBuiltIn {
+                enablePremiumFeatures(for: existing, in: context)
+                try? context.save()
+            }
+            return existing
+        }
 
         let configuration = templateConfiguration(for: purpose)
         let album = Album(
@@ -56,6 +62,38 @@ enum CapturePresetService {
         return album
     }
 
+    static func upgradePremiumTemplates(in context: ModelContext) {
+        guard PremiumAccess.isActive else { return }
+        let albums = (try? context.fetch(FetchDescriptor<Album>())) ?? []
+        for album in albums where album.isBuiltIn && premiumTemplatePurposes.contains(album.purpose) {
+            enablePremiumFeatures(for: album, in: context)
+        }
+        try? context.save()
+    }
+
+    static func canUse(_ preset: CapturePreset, hasPremium: Bool = PremiumAccess.isActive) -> Bool {
+        preset.purpose == .general || hasPremium
+    }
+
+    private static func enablePremiumFeatures(for album: Album, in context: ModelContext) {
+        album.smartRuleEnabled = true
+        let configuration = templateConfiguration(for: album.purpose)
+        let presets = (try? context.fetch(FetchDescriptor<CapturePreset>())) ?? []
+        ensurePreset(
+            named: album.purpose.title,
+            purpose: album.purpose,
+            album: album,
+            retention: configuration.retention,
+            ocrEnabled: configuration.ocrEnabled,
+            savesLocation: configuration.savesLocation,
+            autoPins: configuration.autoPins,
+            primaryAction: configuration.primaryAction,
+            sortOrder: presets.count,
+            existing: presets,
+            context: context
+        )
+    }
+
     private static func templateConfiguration(for purpose: CapturePurpose) -> (
         retention: RetentionPolicy,
         ocrEnabled: Bool,
@@ -70,6 +108,8 @@ enum CapturePresetService {
             (.untilComplete, false, true, true, .findCar)
         case .document:
             (.forever, true, false, false, .automatic)
+        case .travel:
+            (.forever, true, true, false, .automatic)
         case .qr:
             (.sevenDays, true, false, false, .open)
         case .temporary:
@@ -77,50 +117,6 @@ enum CapturePresetService {
         default:
             (.forever, true, false, false, .automatic)
         }
-    }
-
-    private static func migrateUnusedLegacyTemplates(
-        albums: [Album],
-        presets: [CapturePreset],
-        in context: ModelContext
-    ) {
-        let media = (try? context.fetch(FetchDescriptor<MediaItem>())) ?? []
-        let usedAlbumIDs = Set(media.compactMap(\.albumID))
-        let removableAlbumIDs = Set(albums.filter {
-            $0.isBuiltIn && $0.purpose != .general && !usedAlbumIDs.contains($0.id)
-        }.map(\.id))
-        presets.filter {
-            $0.isBuiltIn && $0.purpose != .general
-                && ($0.albumID.map(removableAlbumIDs.contains) ?? true)
-        }.forEach(context.delete)
-        albums.filter { removableAlbumIDs.contains($0.id) }.forEach(context.delete)
-    }
-
-    private static func ensureAlbum(
-        named name: String,
-        purpose: CapturePurpose,
-        retention: RetentionPolicy,
-        ocrEnabled: Bool,
-        savesLocation: Bool,
-        autoPins: Bool,
-        primaryAction: PrimaryMediaAction,
-        existing: [Album],
-        context: ModelContext
-    ) -> Album {
-        if let album = existing.first(where: { $0.purpose == purpose })
-            ?? existing.first(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }) {
-            album.isBuiltIn = true
-            return album
-        }
-        let album = Album(name: name, sortOrder: existing.count, defaultRetention: retention)
-        album.purpose = purpose
-        album.ocrEnabled = ocrEnabled
-        album.savesLocation = savesLocation
-        album.autoPins = autoPins
-        album.primaryAction = primaryAction
-        album.isBuiltIn = true
-        context.insert(album)
-        return album
     }
 
     private static func ensurePreset(

@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 enum SmartAlbum: String, Hashable {
     case all, camera, temporary, pinned, unclassified, recentlyDeleted
 
-    static let libraryCases: [SmartAlbum] = [.all, .camera, .temporary, .pinned, .unclassified]
+    static let libraryCases: [SmartAlbum] = [.all, .temporary, .pinned, .unclassified]
 
     var title: String {
         switch self {
@@ -91,14 +91,17 @@ struct LibraryView: View {
     @State private var restoredLastDestination = false
 
     private var columns: [GridItem] {
-        if horizontalSizeClass == .compact {
-            return Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
-        }
-        return [GridItem(.adaptive(minimum: 154, maximum: 260), spacing: 18)]
+        let count = horizontalSizeClass == .compact ? 2 : 4
+        let spacing: CGFloat = horizontalSizeClass == .compact ? 10 : 18
+        return Array(repeating: GridItem(.flexible(), spacing: spacing), count: count)
     }
 
     private var albumGridSpacing: CGFloat {
         horizontalSizeClass == .compact ? 16 : 24
+    }
+
+    private var userAlbums: [Album] {
+        albums
     }
 
     var body: some View {
@@ -113,34 +116,46 @@ struct LibraryView: View {
                             }
                         }
 
-                        LazyVGrid(columns: columns, spacing: albumGridSpacing) {
-                            ForEach(SmartAlbum.libraryCases, id: \.self) { smart in
-                                NavigationLink(value: AlbumDestination.smart(smart)) {
-                                    AlbumTile(
-                                        title: smart.title,
-                                        count: items(in: smart).count,
-                                        cover: items(in: smart).first,
-                                        symbol: smart.symbol,
-                                        detail: smart == .temporary ? cleanupDetail : nil
-                                    )
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text(L10n.text("보관함"))
+                                .font(.title2.bold())
+
+                            LazyVGrid(columns: columns, spacing: albumGridSpacing) {
+                                ForEach(SmartAlbum.libraryCases, id: \.self) { smart in
+                                    NavigationLink(value: AlbumDestination.smart(smart)) {
+                                        AlbumTile(
+                                            title: smart.title,
+                                            count: items(in: smart).count,
+                                            cover: items(in: smart).first,
+                                            symbol: smart.symbol,
+                                            detail: smart == .temporary ? cleanupDetail : nil
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
+                            }
+                        }
+
+                        if !userAlbums.isEmpty {
+                            VStack(alignment: .leading, spacing: 14) {
+                                Text(L10n.text("내 앨범"))
+                                    .font(.title2.bold())
+
+                                LazyVGrid(columns: columns, spacing: albumGridSpacing) {
+                                    ForEach(userAlbums) { album in
+                                        userAlbumTile(album)
+                                    }
+                                }
                             }
                         }
 
                         VStack(alignment: .leading, spacing: 14) {
-                            Text(L10n.text("내 앨범"))
+                            Text(L10n.text("템플릿"))
                                 .font(.title2.bold())
 
-                            if albums.isEmpty {
-                                Text(L10n.text("만든 앨범이 없습니다."))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                LazyVGrid(columns: columns, spacing: albumGridSpacing) {
-                                    ForEach(albums) { album in
-                                        userAlbumTile(album)
-                                    }
+                            LazyVGrid(columns: columns, spacing: albumGridSpacing) {
+                                ForEach(CapturePresetService.templatePurposes) { purpose in
+                                    templateTile(purpose)
                                 }
                             }
                         }
@@ -149,16 +164,6 @@ struct LibraryView: View {
                     .padding(.bottom, 104)
                 } else {
                     searchResultsView
-                }
-            }
-            .overlay {
-                if media.isEmpty && albums.isEmpty {
-                    ContentUnavailableView(
-                        "나만의 보관함",
-                        systemImage: "photo.on.rectangle.angled",
-                        description: Text(L10n.text("촬영하거나 가져온 사진은 기본 사진 앱과 섞이지 않고 이 앱에만 저장됩니다."))
-                    )
-                    .padding(.bottom, 70)
                 }
             }
             .navigationTitle("")
@@ -378,11 +383,11 @@ struct LibraryView: View {
         .padding(.bottom, 8)
     }
 
-    private func userAlbumTile(_ album: Album) -> some View {
+    private func userAlbumTile(_ album: Album, symbol: String = "rectangle.stack.fill") -> some View {
         let albumMedia = media.filter { $0.albumID == album.id && $0.deletedAt == nil }
         let cover = album.coverMediaID.flatMap { coverID in albumMedia.first { $0.id == coverID } } ?? albumMedia.first
         return NavigationLink(value: AlbumDestination.user(album.id, album.displayName)) {
-            AlbumTile(title: album.displayName, count: albumMedia.count, cover: cover, symbol: "rectangle.stack.fill")
+            AlbumTile(title: album.displayName, count: albumMedia.count, cover: cover, symbol: symbol)
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -401,6 +406,43 @@ struct LibraryView: View {
             Button(role: .destructive) { albumPendingDeletion = album } label: {
                 Label(L10n.text("앨범 삭제"), systemImage: "trash")
             }
+        }
+    }
+
+    @ViewBuilder
+    private func templateTile(_ purpose: CapturePurpose) -> some View {
+        Button {
+            let album = CapturePresetService.addTemplate(purpose, in: modelContext)
+            navigationPath.append(.user(album.id, album.displayName))
+        } label: {
+            AlbumTile(
+                title: purpose.title,
+                count: 0,
+                cover: nil,
+                symbol: templateSymbol(for: purpose),
+                subtitle: templateFeature(for: purpose)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func templateSymbol(for purpose: CapturePurpose) -> String {
+        switch purpose {
+        case .receipt: "receipt"
+        case .travel: "airplane"
+        case .parking: "car"
+        case .document: "doc.text"
+        default: "folder"
+        }
+    }
+
+    private func templateFeature(for purpose: CapturePurpose) -> String {
+        switch purpose {
+        case .receipt: L10n.text("지출 리포트")
+        case .travel: L10n.text("사진 지도")
+        case .parking: L10n.text("위치 · 완료")
+        case .document: L10n.text("OCR · PDF")
+        default: ""
         }
     }
 
@@ -1007,6 +1049,7 @@ struct AlbumTemplatePickerView: View {
     private func templateSymbol(for purpose: CapturePurpose) -> String {
         switch purpose {
         case .receipt: "receipt"
+        case .travel: "airplane"
         case .parking: "car"
         case .document: "doc.text"
         case .qr: "qrcode"
@@ -1250,6 +1293,7 @@ struct AlbumTile: View {
     let cover: MediaItem?
     let symbol: String
     var detail: String?
+    var subtitle: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1272,11 +1316,18 @@ struct AlbumTile: View {
             Text(title)
                 .font(horizontalSizeClass == .compact ? .subheadline.bold() : .headline)
                 .lineLimit(1)
-            HStack {
-                Text(L10n.format("%d개", count)).foregroundStyle(.secondary)
-                if let detail { Text("· \(detail)").foregroundStyle(.orange).lineLimit(1) }
+            if let subtitle {
+                Text(subtitle)
+                    .font(horizontalSizeClass == .compact ? .caption : .subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else {
+                HStack {
+                    Text(L10n.format("%d개", count)).foregroundStyle(.secondary)
+                    if let detail { Text("· \(detail)").foregroundStyle(.orange).lineLimit(1) }
+                }
+                .font(horizontalSizeClass == .compact ? .caption : .subheadline)
             }
-            .font(horizontalSizeClass == .compact ? .caption : .subheadline)
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)

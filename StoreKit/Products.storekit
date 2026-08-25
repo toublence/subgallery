@@ -1,0 +1,105 @@
+{
+  "identifier" : "94AF7539-2E5E-42F6-A69D-50478A94FA9B",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "79.99",
+      "familyShareable" : false,
+      "internalID" : "B42F8508-1FE4-42A2-8A80-514D06D248BF",
+      "localizations" : [
+        {
+          "description" : "Permanent access to SubGallery Premium",
+          "displayName" : "Premium Lifetime",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.namslab.subgallery.premium.lifetime",
+      "referenceName" : "Premium Lifetime",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "1234567890",
+    "_developerTeamID" : "2CZQR7Q423",
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 0,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "D8496AAA-E9A5-4B6D-B507-B4CA11B87DEE",
+      "localizations" : [
+
+      ],
+      "name" : "SubGallery Premium",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "2.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "690862EC-D0D8-46BE-8FFB-3D88547A3D5C",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Monthly access to SubGallery Premium",
+              "displayName" : "Premium Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.namslab.subgallery.premium.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Premium Monthly",
+          "subscriptionGroupID" : "D8496AAA-E9A5-4B6D-B507-B4CA11B87DEE",
+          "type" : "RecurringSubscription",
+          "winBackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "24.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "ADAA1708-26C3-4990-91CF-127F98B614B8",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Yearly access to SubGallery Premium",
+              "displayName" : "Premium Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.namslab.subgallery.premium.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Premium Yearly",
+          "subscriptionGroupID" : "D8496AAA-E9A5-4B6D-B507-B4CA11B87DEE",
+          "type" : "RecurringSubscription",
+          "winBackOffers" : [
+
+          ]
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

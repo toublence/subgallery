@@ -10,6 +10,7 @@ struct CameraView: View {
     @Query(sort: \MediaItem.createdAt, order: .reverse) private var media: [MediaItem]
     @Query(sort: \CapturePreset.sortOrder) private var presets: [CapturePreset]
     let onOpenLibrary: (AlbumDestination) -> Void
+    @StateObject private var purchases = PurchaseManager.shared
     @StateObject private var camera = CameraController()
     @StateObject private var locationProvider = CaptureLocationProvider()
     @State private var aspectRatio = "4:3"
@@ -55,8 +56,14 @@ struct CameraView: View {
     }
 
     private var activePreset: CapturePreset? {
-        guard let selectedPreset, selectedPreset.purpose != .general else { return nil }
+        guard let selectedPreset,
+              CapturePresetService.canUse(selectedPreset, hasPremium: purchases.isPremium),
+              selectedPreset.purpose != .general else { return nil }
         return selectedPreset
+    }
+
+    private var availablePresets: [CapturePreset] {
+        presets.filter { CapturePresetService.canUse($0, hasPremium: purchases.isPremium) }
     }
 
     private var purposeName: String {
@@ -284,7 +291,7 @@ struct CameraView: View {
     private var purposeMenu: some View {
         Menu {
             Section(L10n.text("촬영 목적")) {
-                ForEach(presets) { preset in
+                ForEach(availablePresets) { preset in
                     Button {
                         selectPreset(preset)
                     } label: {
@@ -576,6 +583,7 @@ struct CameraView: View {
     }
 
     private func selectPreset(_ preset: CapturePreset) {
+        guard CapturePresetService.canUse(preset, hasPremium: purchases.isPremium) else { return }
         purposePresetID = preset.id.uuidString
         if preset.purpose == .general {
             applyDestinationRetention()
@@ -601,7 +609,9 @@ struct CameraView: View {
     }
 
     private func applyPurposeRules() {
-        guard let selectedPreset else {
+        guard let selectedPreset,
+              CapturePresetService.canUse(selectedPreset, hasPremium: purchases.isPremium) else {
+            purposePresetID = "general"
             applyDestinationRetention()
             return
         }
