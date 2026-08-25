@@ -191,12 +191,6 @@ struct LibraryView: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Text(L10n.text("보관함"))
-                        .font(.headline.bold())
-                        .fixedSize(horizontal: true, vertical: false)
-                        .layoutPriority(2)
-                }
                 ToolbarItem(placement: .principal) {
                     librarySearchBar
                 }
