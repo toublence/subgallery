@@ -187,6 +187,11 @@ struct LibraryView: View {
                     searchResultsView
                 }
             }
+            .defaultScrollAnchor(
+                StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "workflows"
+                    ? .bottom
+                    : .top
+            )
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -359,6 +364,7 @@ struct LibraryView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
+                .onSubmit { logSearch() }
 
             if !searchText.isEmpty {
                 Button {
@@ -569,6 +575,9 @@ struct LibraryView: View {
     private func createAlbum() {
         let name = newAlbumName.trimmingCharacters(in: .whitespacesAndNewlines)
         modelContext.insert(Album(name: name, sortOrder: albums.count))
+        if (try? modelContext.save()) != nil {
+            SubGalleryAnalytics.albumCreated()
+        }
         newAlbumName = ""
     }
 
@@ -625,16 +634,35 @@ struct LibraryView: View {
 
     private func importPhotos(_ selection: [PhotosPickerItem], into album: Album? = nil) {
         guard !selection.isEmpty else { return }
+        let destination = analyticsImportDestination(album: album)
+        SubGalleryAnalytics.mediaAddStart(
+            source: .photos,
+            destination: destination,
+            template: nil,
+            kind: analyticsKind(selection)
+        )
         Task {
             defer {
                 if album == nil { photosSelection = [] } else { albumPhotosSelection = []; albumForPhotoImport = nil }
             }
             for item in selection {
                 do {
-                    guard let data = try await item.loadTransferable(type: Data.self) else { continue }
+                    guard let data = try await item.loadTransferable(type: Data.self) else {
+                        SubGalleryAnalytics.mediaAddFailed(
+                            source: .photos, destination: destination, template: nil,
+                            kind: .photo, reason: .decodeFailed
+                        )
+                        continue
+                    }
                     let stored = try await MediaStorage.shared.store(data: data, type: item.supportedContentTypes.first)
                     insert(stored, source: .photos, album: album)
-                } catch { importError = error.localizedDescription }
+                } catch {
+                    SubGalleryAnalytics.mediaAddFailed(
+                        source: .photos, destination: destination, template: nil,
+                        kind: .photo, reason: .storageFailed
+                    )
+                    importError = error.localizedDescription
+                }
             }
         }
     }
@@ -642,13 +670,28 @@ struct LibraryView: View {
     private func importFiles(_ result: Result<[URL], Error>) {
         Task {
             do {
-                for url in try result.get() {
+                let urls = try result.get()
+                guard !urls.isEmpty else { return }
+                let destination = analyticsImportDestination(album: nil)
+                SubGalleryAnalytics.mediaAddStart(
+                    source: .files, destination: destination, template: nil,
+                    kind: .mixed
+                )
+                for url in urls {
                     let access = url.startAccessingSecurityScopedResource()
                     defer { if access { url.stopAccessingSecurityScopedResource() } }
                     let stored = try await MediaStorage.shared.store(fileAt: url)
                     insert(stored, source: .files)
                 }
-            } catch { importError = error.localizedDescription }
+            } catch {
+                let error = error as NSError
+                guard error.code != NSUserCancelledError else { return }
+                SubGalleryAnalytics.mediaAddFailed(
+                    source: .files, destination: analyticsImportDestination(album: nil),
+                    template: nil, kind: .mixed, reason: .storageFailed
+                )
+                importError = error.localizedDescription
+            }
         }
     }
 
@@ -680,10 +723,49 @@ struct LibraryView: View {
                 : nil
         )
         modelContext.insert(item)
-        try? modelContext.save()
+        guard (try? modelContext.save()) != nil else {
+            SubGalleryAnalytics.mediaAddFailed(
+                source: source == .photos ? .photos : .files,
+                destination: analyticsImportDestination(album: targetAlbum),
+                template: nil,
+                kind: stored.kind == .video ? .video : .photo,
+                reason: .saveFailed
+            )
+            return
+        }
+        SubGalleryAnalytics.mediaAddSuccess(
+            source: source == .photos ? .photos : .files,
+            destination: analyticsImportDestination(album: targetAlbum),
+            template: nil,
+            kind: stored.kind == .video ? .video : .photo
+        )
         ReviewPromptPolicy.recordSuccessfulSave()
         OCRService.enqueue(item, in: modelContext)
         requestReviewIfAppropriate()
+    }
+
+    private func analyticsImportDestination(album: Album?) -> SubGalleryAnalytics.Destination {
+        if album != nil { return .userAlbum }
+        switch StorageDestination(token: defaultImportDestination) {
+        case .temporary: return .temporary
+        case .album: return .userAlbum
+        case .camera, .all: return .general
+        }
+    }
+
+    private func analyticsKind(_ selection: [PhotosPickerItem]) -> SubGalleryAnalytics.AddedMediaKind {
+        let kinds = Set(selection.map { item in
+            item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) }) ? MediaKind.video : .photo
+        })
+        if kinds.count > 1 { return .mixed }
+        return kinds.first == .video ? .video : .photo
+    }
+
+    private func logSearch() {
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        SubGalleryAnalytics.searchPerformed(
+            resultCount: searchResults.count + documentSearchResults.count
+        )
     }
 
     private func requestReviewIfAppropriate() {

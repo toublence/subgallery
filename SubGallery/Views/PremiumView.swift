@@ -7,7 +7,7 @@ enum PremiumAccess {
     private static var verifiedActive: Bool?
 
     static var isActive: Bool {
-        verifiedActive == true
+        verifiedActive ?? cachedIsActive
     }
 
     static var cachedIsActive: Bool {
@@ -54,7 +54,15 @@ final class PurchaseManager: ObservableObject {
     @Published private(set) var isRestoring = false
     @Published var message: String?
 
-    var isPremium: Bool { !purchasedProductIDs.isEmpty }
+    @Published private(set) var hasResolvedEntitlements = false
+
+    /// Keep the last verified Premium state while StoreKit restores the current
+    /// transaction set. This prevents a paid user from briefly seeing free gates
+    /// during app launch, while the resolved StoreKit result remains authoritative.
+    var isPremium: Bool {
+        !purchasedProductIDs.isEmpty
+            || (!hasResolvedEntitlements && PremiumAccess.cachedIsActive)
+    }
     var canMakePayments: Bool { AppStore.canMakePayments }
 
     private var hasLoadedProducts = false
@@ -99,9 +107,9 @@ final class PurchaseManager: ObservableObject {
         await prepare()
     }
 
-    func purchase(_ product: Product) async {
+    func purchase(_ product: Product, entryPoint: PremiumEntryPoint = .general) async {
         guard canMakePayments, !isPurchasing else { return }
-        PremiumAnalytics.purchaseStarted(productID: product.id)
+        PremiumAnalytics.purchaseStarted(productID: product.id, entryPoint: entryPoint)
         isPurchasing = true
         defer { isPurchasing = false }
 
@@ -115,7 +123,7 @@ final class PurchaseManager: ObservableObject {
                 await transaction.finish()
                 await refreshEntitlements()
                 if isPremium {
-                    PremiumAnalytics.purchaseSucceeded(productID: product.id)
+                    PremiumAnalytics.purchaseSucceeded(productID: product.id, entryPoint: entryPoint)
                     NotificationCenter.default.post(name: .premiumBackfillRequested, object: nil)
                 }
                 message = L10n.text("구매가 완료되었습니다.")
@@ -160,7 +168,9 @@ final class PurchaseManager: ObservableObject {
             activeIDs.insert(transaction.productID)
         }
         purchasedProductIDs = activeIDs
+        hasResolvedEntitlements = true
         PremiumAccess.updateVerified(isActive: isPremium)
+        SubGalleryAnalytics.updatePremiumUserProperty(isPremium: isPremium)
         if wasPremium != isPremium {
             NotificationCenter.default.post(
                 name: .premiumEntitlementDidChange,
@@ -174,6 +184,7 @@ final class PurchaseManager: ObservableObject {
     func configureForTesting(productIDs: Set<String>) {
         let wasPremium = PremiumAccess.isActive
         purchasedProductIDs = productIDs.intersection(Set(Self.entitlementProductIDs))
+        hasResolvedEntitlements = true
         PremiumAccess.configureForTesting(isActive: isPremium)
         if wasPremium != isPremium {
             NotificationCenter.default.post(
@@ -427,30 +438,48 @@ enum PremiumFeatureCatalog {
 
 enum PremiumAnalytics {
     static func paywallViewed(entryPoint: PremiumEntryPoint) {
-        Analytics.logEvent("premium_paywall_view", parameters: ["entry_point": entryPoint.rawValue])
+        SubGalleryAnalytics.logExisting("premium_paywall_view", parameters: ["entry_point": entryPoint.rawValue])
     }
 
-    static func purchaseStarted(productID: String) {
-        Analytics.logEvent("premium_purchase_start", parameters: ["plan": plan(productID)])
+    static func purchaseStarted(productID: String, entryPoint: PremiumEntryPoint = .general) {
+        SubGalleryAnalytics.logExisting("premium_purchase_start", parameters: [
+            "plan": plan(productID), "entry_point": entryPoint.rawValue
+        ])
     }
 
-    static func purchaseSucceeded(productID: String) {
-        Analytics.logEvent("premium_purchase_success", parameters: ["plan": plan(productID)])
+    static func purchaseSucceeded(productID: String, entryPoint: PremiumEntryPoint = .general) {
+        SubGalleryAnalytics.logExisting("premium_purchase_success", parameters: [
+            "plan": plan(productID), "entry_point": entryPoint.rawValue
+        ])
     }
 
     static func restoreSucceeded() {
-        Analytics.logEvent("premium_restore_success", parameters: nil)
+        SubGalleryAnalytics.logExisting("premium_restore_success")
     }
 
     static func trialUsed(_ feature: PremiumFeatureID, remaining: Int) {
-        Analytics.logEvent("premium_feature_trial_used", parameters: [
+        SubGalleryAnalytics.logExisting("premium_feature_trial_used", parameters: [
             "feature": feature.rawValue,
             "remaining": remaining
         ])
     }
 
     static func limitReached(_ feature: PremiumFeatureID) {
-        Analytics.logEvent("premium_feature_limit_reached", parameters: ["feature": feature.rawValue])
+        SubGalleryAnalytics.logExisting("premium_feature_limit_reached", parameters: ["feature": feature.rawValue])
+    }
+
+    static func planSelected(productID: String, entryPoint: PremiumEntryPoint) {
+        SubGalleryAnalytics.premiumPlanSelected(
+            plan: plan(productID),
+            entryPoint: entryPoint.rawValue
+        )
+    }
+
+    static func paywallDismissed(entryPoint: PremiumEntryPoint, selectedProductID: String) {
+        SubGalleryAnalytics.premiumPaywallDismissed(
+            entryPoint: entryPoint.rawValue,
+            selectedPlan: plan(selectedProductID)
+        )
     }
 
     private static func plan(_ productID: String) -> String {
@@ -465,10 +494,13 @@ enum PremiumAnalytics {
 
 struct PremiumView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @StateObject private var purchases = PurchaseManager.shared
     @State private var selectedID = PurchaseManager.yearlyID
     @State private var showsComparison = false
     @State private var didLogPaywallView = false
+    @State private var didCompletePurchase = false
+    @State private var didLogDismiss = false
     let entryPoint: PremiumEntryPoint
 
     init(entryPoint: PremiumEntryPoint = .general) {
@@ -477,6 +509,7 @@ struct PremiumView: View {
 
     private let privacyURL = URL(string: "https://motionfit.fit/subgallery/privacy/")!
     private let termsURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
+    private let subscriptionsURL = URL(string: "https://apps.apple.com/account/subscriptions")!
 
     private var selectedProduct: Product? {
         purchases.products.first { $0.id == selectedID }
@@ -488,6 +521,19 @@ struct PremiumView: View {
 
     private var secondaryProducts: [Product] {
         purchases.products.filter { $0.id == PurchaseManager.monthlyID }
+    }
+
+    private var activeSubscriptionID: String? {
+        [PurchaseManager.yearlyID, PurchaseManager.monthlyID]
+            .first { purchases.purchasedProductIDs.contains($0) }
+    }
+
+    private var activePlanName: String {
+        switch activeSubscriptionID {
+        case PurchaseManager.yearlyID: L10n.text("SubGallery Premium 연간")
+        case PurchaseManager.monthlyID: L10n.text("SubGallery Premium 월간")
+        default: "SubGallery Premium"
+        }
     }
 
     var body: some View {
@@ -512,7 +558,7 @@ struct PremiumView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(L10n.text("닫기")) { dismiss() }
+                    Button(L10n.text("닫기")) { closePaywall() }
                 }
             }
         }
@@ -526,6 +572,10 @@ struct PremiumView: View {
             PremiumAnalytics.paywallViewed(entryPoint: entryPoint)
         }
         .onChange(of: purchases.products.map(\.id)) { _, _ in chooseAvailableDefault() }
+        .onChange(of: purchases.isPremium) { wasPremium, isPremium in
+            if !wasPremium, isPremium { didCompletePurchase = true }
+        }
+        .onDisappear { logPaywallDismissIfNeeded() }
         .alert("SubGallery Premium", isPresented: Binding(
             get: { purchases.message != nil },
             set: { if !$0 { purchases.message = nil } }
@@ -633,42 +683,65 @@ struct PremiumView: View {
 
     @ViewBuilder
     private var productSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(L10n.text("플랜 선택"))
-                .font(.headline.bold())
+        if purchases.isPremium {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(L10n.text("현재 플랜"))
+                    .font(.headline.bold())
 
-            if purchases.isLoading {
-                ProgressView(L10n.text("상품을 불러오는 중…"))
-                    .frame(maxWidth: .infinity, minHeight: 120)
-            } else if purchases.products.isEmpty {
-                ContentUnavailableView {
-                    Label(L10n.text("상품을 불러올 수 없음"), systemImage: "cart")
-                } description: {
-                    Text(L10n.text("App Store에서 상품을 찾을 수 없습니다."))
-                } actions: {
-                    Button(L10n.text("다시 시도")) {
-                        Task { await purchases.reloadProducts() }
+                HStack(spacing: 12) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.title2)
+                        .foregroundStyle(Color.accentColor)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(activePlanName)
+                            .font(.headline)
+                        Text(L10n.text("구매됨"))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.bordered)
+                    Spacer()
                 }
-            } else {
-                if let yearlyProduct {
-                    YearlyProductCard(
-                        product: yearlyProduct,
-                        isSelected: selectedID == yearlyProduct.id,
-                        isPurchased: purchases.purchasedProductIDs.contains(yearlyProduct.id),
-                        select: { selectedID = yearlyProduct.id }
-                    )
-                }
+                .padding(16)
+                .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(L10n.text("플랜 선택"))
+                    .font(.headline.bold())
 
-                HStack(alignment: .top, spacing: 10) {
-                    ForEach(secondaryProducts) { product in
-                        SecondaryProductCard(
-                            product: product,
-                            isSelected: selectedID == product.id,
-                            isPurchased: purchases.purchasedProductIDs.contains(product.id),
-                            select: { selectedID = product.id }
+                if purchases.isLoading {
+                    ProgressView(L10n.text("상품을 불러오는 중…"))
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                } else if purchases.products.isEmpty {
+                    ContentUnavailableView {
+                        Label(L10n.text("상품을 불러올 수 없음"), systemImage: "cart")
+                    } description: {
+                        Text(L10n.text("App Store에서 상품을 찾을 수 없습니다."))
+                    } actions: {
+                        Button(L10n.text("다시 시도")) {
+                            Task { await purchases.reloadProducts() }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                } else {
+                    if let yearlyProduct {
+                        YearlyProductCard(
+                            product: yearlyProduct,
+                            isSelected: selectedID == yearlyProduct.id,
+                            isPurchased: purchases.purchasedProductIDs.contains(yearlyProduct.id),
+                            select: { selectPlan(yearlyProduct.id) }
                         )
+                    }
+
+                    HStack(alignment: .top, spacing: 10) {
+                        ForEach(secondaryProducts) { product in
+                            SecondaryProductCard(
+                                product: product,
+                                isSelected: selectedID == product.id,
+                                isPurchased: purchases.purchasedProductIDs.contains(product.id),
+                                select: { selectPlan(product.id) }
+                            )
+                        }
                     }
                 }
             }
@@ -678,11 +751,17 @@ struct PremiumView: View {
     private var purchaseBar: some View {
         VStack(spacing: 7) {
             if purchases.isPremium {
+                if activeSubscriptionID != nil {
+                    Button(L10n.text("구독 관리")) { openURL(subscriptionsURL) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity)
+                }
                 Button(L10n.text("완료")) { dismiss() }
                     .prominentPurchaseButton()
             } else if let selectedProduct {
                 Button {
-                    Task { await purchases.purchase(selectedProduct) }
+                    Task { await purchases.purchase(selectedProduct, entryPoint: entryPoint) }
                 } label: {
                     Group {
                         if purchases.isPurchasing {
@@ -699,20 +778,22 @@ struct PremiumView: View {
                 .disabled(purchases.isPurchasing || !purchases.canMakePayments)
             }
 
-            if selectedProduct?.subscription != nil {
+            if !purchases.isPremium, selectedProduct?.subscription != nil {
                 Text(L10n.text("언제든지 취소할 수 있습니다."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 16) {
-                Button {
-                    Task { await purchases.restore() }
-                } label: {
-                    if purchases.isRestoring { ProgressView() }
-                    else { Text(L10n.text("구매 복원")) }
+                if !purchases.isPremium {
+                    Button {
+                        Task { await purchases.restore() }
+                    } label: {
+                        if purchases.isRestoring { ProgressView() }
+                        else { Text(L10n.text("구매 복원")) }
+                    }
+                    .disabled(purchases.isRestoring)
                 }
-                .disabled(purchases.isRestoring)
                 Link(L10n.text("이용 약관"), destination: termsURL)
                 Link(L10n.text("개인정보 처리방침"), destination: privacyURL)
             }
@@ -728,7 +809,7 @@ struct PremiumView: View {
 
     private var legalSection: some View {
         VStack(spacing: 10) {
-            if selectedProduct?.subscription != nil {
+            if !purchases.isPremium, selectedProduct?.subscription != nil {
                 Text(L10n.text("구독은 현재 기간이 끝나기 최소 24시간 전에 취소하지 않으면 자동으로 갱신됩니다."))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
@@ -768,6 +849,27 @@ struct PremiumView: View {
         selectedID = purchases.products.first(where: { $0.id == PurchaseManager.yearlyID })?.id
             ?? purchases.products.first?.id
             ?? PurchaseManager.yearlyID
+    }
+
+    private func selectPlan(_ productID: String) {
+        selectedID = productID
+        PremiumAnalytics.planSelected(productID: productID, entryPoint: entryPoint)
+    }
+
+    private func closePaywall() {
+        logPaywallDismissIfNeeded()
+        dismiss()
+    }
+
+    private func logPaywallDismissIfNeeded() {
+        guard !didLogDismiss, !purchases.isPremium, !didCompletePurchase else { return }
+        didLogDismiss = true
+        if !purchases.isPremium {
+            PremiumAnalytics.paywallDismissed(
+                entryPoint: entryPoint,
+                selectedProductID: selectedID
+            )
+        }
     }
 }
 

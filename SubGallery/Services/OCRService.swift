@@ -264,6 +264,7 @@ actor OCRService {
         }
         item.ocrStatus = .processing
         let url = item.mediaURL
+        let alreadyHadQRCode = !item.detectedQRCodes.isEmpty
 
         Task(priority: .utility) {
             do {
@@ -283,7 +284,31 @@ actor OCRService {
                 let isReceipt = item.purpose == .receipt
                     || item.suggestedPurpose == .receipt
                     || SmartClassificationService.isHighConfidenceReceipt(result, text: result.text)
-                if isReceipt { ReceiptInfoWriter.apply(result, to: item) }
+                if isReceipt {
+                    ReceiptInfoWriter.apply(result, to: item)
+                    let receiptResult: SubGalleryAnalytics.ReceiptResult = if result.text.isEmpty {
+                        .unreadable
+                    } else if !result.receiptMerchant.isEmpty,
+                              !result.receiptAmount.isEmpty,
+                              !result.dates.isEmpty {
+                        .success
+                    } else {
+                        .partial
+                    }
+                    SubGalleryAnalytics.receiptAnalysisComplete(
+                        result: receiptResult,
+                        merchantDetected: !result.receiptMerchant.isEmpty,
+                        amountDetected: !result.receiptAmount.isEmpty,
+                        dateDetected: !result.dates.isEmpty
+                    )
+                }
+                if result.hasQRCode, !alreadyHadQRCode {
+                    let type = result.qrCodes.first
+                        .map(QRContentService.parse)
+                        .map { SubGalleryAnalytics.qrType($0.type) }
+                        ?? .unknown
+                    SubGalleryAnalytics.qrDetected(type)
+                }
                 if PremiumAccess.isActive {
                     item.premiumAnalysisVersion = PremiumBackfillService.currentVersion
                 }

@@ -1,0 +1,15 @@
+{
+  "locale": "ar-SA",
+  "language": "ar",
+  "appleLocale": "ar_SA",
+  "direction": "rtl",
+  "frames": [
+    {"frame": 1, "filename": "01-separate.png", "route": "library", "headline": "احتفظ بما تحتاجه فقط\nبعيدًا عن تطبيق الصور", "support": "احفظ الصور والفيديوهات التي تختارها بشكل منفصل داخل SubGallery."},
+    {"frame": 2, "filename": "02-templates.png", "route": "workflows", "headline": "لكل نوع من الصور\nطريقة إدارة مناسبة", "support": "الإيصالات والمستندات وQR والسفر، لكل منها أدوات مخصصة."},
+    {"frame": 3, "filename": "03-receipts.png", "route": "receipt-report", "headline": "حوّل الإيصالات\nإلى تقرير مصروفات", "support": "اجمع مبالغ الدفع وراجع اتجاهات الإنفاق وأنماطه."},
+    {"frame": 4, "filename": "04-documents.png", "route": "document-pdf", "headline": "عدة صفحات\nفي ملف PDF واحد", "support": "امسح المستندات واجمع صفحات متعددة في ملف PDF واحد."},
+    {"frame": 5, "filename": "05-qr.png", "route": "qr-builder", "headline": "أنشئ رموز QR\nالخاصة بك", "support": "حوّل الروابط وWi-Fi وجهات الاتصال إلى رموز QR واحفظها."},
+    {"frame": 6, "filename": "06-travel-map.png", "route": "travel-map", "headline": "استرجع رحلاتك\nعلى الخريطة", "support": "شاهد مواقع الصور ولحظات السفر على الخريطة والخط الزمني."},
+    {"frame": 7, "filename": "07-album-automation.png", "route": "album-automation", "headline": "ألبوماتك أيضًا\nتعمل وفق قواعدك", "support": "حدّد مدة الاحتفاظ والتنظيف التلقائي لكل ألبوم."}
+  ]
+}

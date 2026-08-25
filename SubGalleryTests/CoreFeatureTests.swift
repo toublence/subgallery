@@ -62,6 +62,71 @@ final class CoreFeatureTests: XCTestCase {
     override func setUp() {
         super.setUp()
         PurchaseManager.shared.configureForTesting(productIDs: [])
+        SubGalleryAnalytics.eventObserver = nil
+    }
+
+    override func tearDown() {
+        SubGalleryAnalytics.eventObserver = nil
+        super.tearDown()
+    }
+
+    func testAnalyticsFirstValueAndActivationAreLoggedOnce() {
+        let suiteName = "analytics-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        var names: [String] = []
+        SubGalleryAnalytics.eventObserver = { name, _ in names.append(name) }
+        let start = Date(timeIntervalSince1970: 1_000)
+        SubGalleryAnalytics.prepareFirstRunTiming(defaults: defaults, now: start)
+
+        for second in [10.0, 20.0, 30.0] {
+            SubGalleryAnalytics.mediaAddSuccess(
+                source: .photos, destination: .general, template: nil, kind: .photo,
+                defaults: defaults, now: start.addingTimeInterval(second)
+            )
+        }
+
+        XCTAssertEqual(names.filter { $0 == "first_value_reached" }.count, 1)
+        XCTAssertEqual(names.filter { $0 == "activation_complete" }.count, 1)
+        XCTAssertEqual(names.filter { $0 == "media_add_success" }.count, 3)
+    }
+
+    func testAnalyticsPayloadsContainNoUserContent() {
+        var events: [(String, [String: Any])] = []
+        SubGalleryAnalytics.eventObserver = { events.append(($0, $1)) }
+        SubGalleryAnalytics.searchPerformed(resultCount: 4)
+        SubGalleryAnalytics.receiptAnalysisComplete(
+            result: .success, merchantDetected: true, amountDetected: true, dateDetected: true
+        )
+        SubGalleryAnalytics.qrDetected(.url)
+        SubGalleryAnalytics.travelLocationSaved(source: .exif)
+
+        let values = events.flatMap { $0.1.values }
+            .map(String.init(describing:))
+            .joined(separator: " ")
+        XCTAssertFalse(values.contains("private search"))
+        XCTAssertFalse(values.contains("merchant name"))
+        XCTAssertFalse(values.contains("https://example.com/secret"))
+        XCTAssertFalse(values.contains("37.5665"))
+    }
+
+    func testAnalyticsDisabledModesAndPremiumNames() {
+        XCTAssertFalse(SubGalleryAnalytics.shouldRecord(arguments: [], storeScreenshot: true))
+        XCTAssertFalse(SubGalleryAnalytics.shouldRecord(arguments: ["-ui-testing"], storeScreenshot: false))
+        XCTAssertTrue(SubGalleryAnalytics.shouldRecord(arguments: ["-FIRDebugEnabled"], storeScreenshot: false))
+
+        var names: [String] = []
+        SubGalleryAnalytics.eventObserver = { name, _ in names.append(name) }
+        PremiumAnalytics.paywallViewed(entryPoint: .receiptReport)
+        PremiumAnalytics.purchaseStarted(productID: PurchaseManager.yearlyID)
+        PremiumAnalytics.purchaseSucceeded(productID: PurchaseManager.yearlyID)
+        PremiumAnalytics.restoreSucceeded()
+        PremiumAnalytics.trialUsed(.travelMap, remaining: 4)
+        PremiumAnalytics.limitReached(.qrBuilder)
+        XCTAssertEqual(names, [
+            "premium_paywall_view", "premium_purchase_start", "premium_purchase_success",
+            "premium_restore_success", "premium_feature_trial_used", "premium_feature_limit_reached"
+        ])
     }
 
     private func receiptAnalysis() -> MediaAnalysisResult {
@@ -658,6 +723,16 @@ final class CoreFeatureTests: XCTestCase {
             Set(try existingContext.fetch(FetchDescriptor<Album>()).map(\.name)),
             Set(["업무", "가족"])
         )
+    }
+
+    func testOnboardingUsesFinalFourPageOrder() {
+        XCTAssertEqual(OnboardingView.pages.count, 4)
+        XCTAssertEqual(OnboardingView.pages.map(\.id), [
+            "separate", "workflows", "outputs", "automation"
+        ])
+        XCTAssertEqual(SubGalleryAnalytics.OnboardingPage.allCases.map(\.rawValue), [
+            "separate", "workflows", "outputs", "automation"
+        ])
     }
 
     func testExplicitCaptureContextTemplatePipelineCases1To8Rules() throws {

@@ -4,6 +4,29 @@ enum OnboardingAction: Equatable {
     case camera
     case importPhotos
     case library
+
+}
+
+enum OnboardingPage: Int, CaseIterable, Identifiable {
+    case separate
+    case workflows
+    case outputs
+    case automation
+
+    var id: String {
+        switch self {
+        case .separate: "separate"
+        case .workflows: "workflows"
+        case .outputs: "outputs"
+        case .automation: "automation"
+        }
+    }
+
+    var index: Int { rawValue + 1 }
+
+    var analyticsPage: SubGalleryAnalytics.OnboardingPage {
+        SubGalleryAnalytics.OnboardingPage(rawValue: id)!
+    }
 }
 
 struct OnboardingView: View {
@@ -11,9 +34,14 @@ struct OnboardingView: View {
     let onFinish: (OnboardingAction) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var page = 0
+    @State private var page: OnboardingPage = .separate
+    @State private var didLogPresentation = false
 
-    private let pageCount = 3
+    static let pages = OnboardingPage.allCases
+
+    private var analyticsContext: SubGalleryAnalytics.OnboardingContext {
+        canDismiss ? .settings : .firstRun
+    }
 
     var body: some View {
         NavigationStack {
@@ -23,31 +51,16 @@ struct OnboardingView: View {
                     .padding(.top, 10)
 
                 TabView(selection: $page) {
-                    onboardingPage(
-                        title: "사진첩과 따로 보관하세요",
-                        description: "기본 사진 앱에 섞고 싶지 않은 사진과 동영상을 SubGallery에 따로 촬영하고 보관할 수 있어요.",
-                        visual: AnyView(SeparateLibraryPreview())
-                    )
-                    .tag(0)
-
-                    onboardingPage(
-                        title: "찍거나 가져오면 바로 정리",
-                        description: "카메라로 바로 촬영하거나 사진 앱에서 가져오세요. 원하는 앨범에 바로 저장할 수 있어요.",
-                        visual: AnyView(CaptureFlowPreview())
-                    )
-                    .tag(1)
-
-                    onboardingPage(
-                        title: "필요한 만큼만 보관하세요",
-                        description: "계속 간직할 사진은 그대로, 잠깐 필요한 사진은 필요한 동안만 보관하세요.",
-                        visual: AnyView(RetentionPreview())
-                    )
-                    .tag(2)
+                    ForEach(Self.pages) { page in
+                        pageView(page)
+                            .tag(page)
+                    }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .animation(.smooth, value: page)
 
                 footer
+                    .frame(maxWidth: 680)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 12)
             }
@@ -62,26 +75,71 @@ struct OnboardingView: View {
         }
         .interactiveDismissDisabled(!canDismiss)
         .sensoryFeedback(.selection, trigger: page)
+        .onAppear {
+            guard !didLogPresentation else { return }
+            didLogPresentation = true
+            SubGalleryAnalytics.onboardingStart(analyticsContext)
+            SubGalleryAnalytics.onboardingPageView(page.analyticsPage, index: page.index, context: analyticsContext)
+        }
+        .onChange(of: page) { _, newPage in
+            SubGalleryAnalytics.onboardingPageView(
+                newPage.analyticsPage,
+                index: newPage.index,
+                context: analyticsContext
+            )
+        }
     }
 
     private var progress: some View {
         HStack(spacing: 7) {
-            ForEach(0..<pageCount, id: \.self) { index in
+            ForEach(Self.pages) { item in
                 Capsule()
-                    .fill(index <= page ? Color.accentColor : Color.secondary.opacity(0.2))
+                    .fill(item.rawValue <= page.rawValue ? Color.accentColor : Color.secondary.opacity(0.2))
                     .frame(height: 4)
             }
         }
+        .frame(maxWidth: 680)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(L10n.format("%d/3단계", page + 1))
+        .accessibilityLabel(L10n.format("%d/4단계", page.index))
     }
 
-    private func onboardingPage(title: String, description: String, visual: AnyView) -> some View {
+    @ViewBuilder
+    private func pageView(_ page: OnboardingPage) -> some View {
+        switch page {
+        case .separate:
+            onboardingPage(
+                title: "필요한 사진만 따로 보관하세요",
+                description: "기본 사진 앱에 섞고 싶지 않은 사진과 동영상을 SubGallery에 따로 보관하세요."
+            ) { SeparateLibraryPreview() }
+        case .workflows:
+            onboardingPage(
+                title: "사진의 목적에 맞게 관리하세요",
+                description: "영수증 · 문서 · QR · 여행처럼 사진의 용도에 맞는 도구를 사용할 수 있어요."
+            ) { WorkflowPreview() }
+        case .outputs:
+            onboardingPage(
+                title: "사진을 보관하는 데서 끝나지 않아요",
+                description: "사진의 목적에 맞게 필요한 결과로 활용할 수 있어요."
+            ) { OutputPreview() }
+        case .automation:
+            onboardingPage(
+                title: "필요한 동안만 보관하고 알아서 정리하세요",
+                description: "보관 기간을 정하고 완료한 사진을 정리하세요. 내 앨범에는 관리 규칙도 설정할 수 있어요."
+            ) { AutomationPreview() }
+        }
+    }
+
+    private func onboardingPage<Visual: View>(
+        title: String,
+        description: String,
+        @ViewBuilder visual: () -> Visual
+    ) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text(L10n.text(title))
                     .font(.largeTitle.bold())
                     .tracking(-0.6)
+                    .minimumScaleFactor(0.85)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Text(L10n.text(description))
@@ -89,12 +147,12 @@ struct OnboardingView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                visual
+                visual()
                     .padding(.top, 10)
             }
             .frame(maxWidth: 680, alignment: .leading)
             .padding(.horizontal, 24)
-            .padding(.top, 24)
+            .padding(.top, 20)
             .padding(.bottom, 16)
             .frame(maxWidth: .infinity)
         }
@@ -103,41 +161,52 @@ struct OnboardingView: View {
 
     @ViewBuilder
     private var footer: some View {
-        if page < pageCount - 1 {
+        if page != .automation {
             Button {
-                withAnimation(.smooth) { page += 1 }
+                guard let next = OnboardingPage(rawValue: page.rawValue + 1) else { return }
+                withAnimation(.smooth) { page = next }
             } label: {
                 Text(L10n.text("다음"))
                     .font(.headline)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 52)
+                    .padding(.vertical, 14)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
         } else {
-            VStack(spacing: 10) {
-                Button { onFinish(.camera) } label: {
+            VStack(spacing: 8) {
+                Button { complete(.camera) } label: {
                     Label(L10n.text("카메라로 첫 사진 찍기"), systemImage: "camera.fill")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 50)
+                        .padding(.vertical, 13)
                 }
                 .buttonStyle(.borderedProminent)
 
-                Button { onFinish(.importPhotos) } label: {
+                Button { complete(.importPhotos) } label: {
                     Label(L10n.text("사진 가져오기"), systemImage: "photo.badge.plus")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 48)
+                        .padding(.vertical, 11)
                 }
                 .buttonStyle(.bordered)
 
-                Button(L10n.text("보관함 먼저 보기")) { onFinish(.library) }
+                Button(L10n.text("보관함 먼저 보기")) { complete(.library) }
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .padding(.top, 2)
+                    .padding(.vertical, 4)
             }
         }
+    }
+
+    private func complete(_ action: OnboardingAction) {
+        let analyticsAction: SubGalleryAnalytics.OnboardingAction = switch action {
+        case .camera: .camera
+        case .importPhotos: .import
+        case .library: .library
+        }
+        SubGalleryAnalytics.onboardingComplete(analyticsAction, context: analyticsContext)
+        onFinish(action)
     }
 }
 
@@ -153,15 +222,16 @@ private struct SeparateLibraryPreview: View {
                 }
             }
 
-            Image(systemName: "arrow.right")
+            Image(systemName: "arrow.forward")
                 .font(.headline)
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
 
             MiniPanel(title: "SubGallery", symbol: "photo.on.rectangle.angled") {
-                VStack(spacing: 6) {
-                    MiniAlbumCard(title: L10n.text("영수증"), detail: L10n.text("30일"), color: .orange, symbol: "receipt.fill")
-                    MiniAlbumCard(title: L10n.text("여행"), detail: L10n.text("계속 보관"), color: .blue, symbol: "airplane")
+                VStack(spacing: 7) {
+                    MiniPurposeRow(title: L10n.text("영수증"), symbol: "receipt.fill")
+                    MiniPurposeRow(title: L10n.text("문서"), symbol: "doc.fill")
+                    MiniPurposeRow(title: L10n.text("여행"), symbol: "airplane")
                 }
             }
         }
@@ -172,73 +242,193 @@ private struct SeparateLibraryPreview: View {
     }
 }
 
-private struct CaptureFlowPreview: View {
+private struct WorkflowPreview: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private let cards: [(String, String, String)] = [
+        ("영수증", "지출 리포트", "receipt.fill"),
+        ("문서", "스캔 · PDF", "doc.viewfinder"),
+        ("QR", "읽기 · 만들기", "qrcode.viewfinder"),
+        ("여행", "사진 지도", "map.fill")
+    ]
+
     var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 10) {
-                SourceButton(title: L10n.text("카메라"), symbol: "camera.fill")
-                SourceButton(title: L10n.text("사진 가져오기"), symbol: "photo.badge.plus")
+        LazyVGrid(
+            columns: Array(
+                repeating: GridItem(.flexible(), spacing: 10),
+                count: horizontalSizeClass == .regular ? 4 : 2
+            ),
+            spacing: 10
+        ) {
+            ForEach(cards, id: \.0) { card in
+                WorkflowCard(title: L10n.text(card.0), detail: L10n.text(card.1), symbol: card.2)
             }
-
-            Image(systemName: "arrow.down")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-
-            VStack(spacing: 0) {
-                DestinationRow(title: L10n.text("영수증"), retention: L10n.text("30일"), symbol: "receipt.fill", color: .orange)
-                Divider().padding(.leading, 48)
-                DestinationRow(title: L10n.text("여행"), retention: L10n.text("계속 보관"), symbol: "airplane", color: .blue)
-            }
-            .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.separator.opacity(0.35)))
         }
         .padding(14)
-        .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .accessibilityElement(children: .combine)
+        .background(.background, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.separator.opacity(0.35)))
+        .accessibilityElement(children: .contain)
     }
 }
 
-private struct RetentionPreview: View {
-    private let options: [(String, String)] = [
-        ("infinity", "계속 보관"),
-        ("checkmark.circle", "완료할 때까지"),
-        ("clock", "24시간"),
-        ("calendar", "7일"),
-        ("calendar.badge.clock", "30일")
+private struct WorkflowCard: View {
+    let title: String
+    let detail: String
+    let symbol: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: symbol)
+                .font(.title2)
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 42, height: 42)
+                .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.headline)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, minHeight: 118, alignment: .topLeading)
+        .padding(12)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title), \(detail)")
+    }
+}
+
+private struct OutputPreview: View {
+    private let rows: [(String, String, String, String)] = [
+        ("영수증", "지출 리포트", "receipt.fill", "chart.bar.fill"),
+        ("문서", "PDF", "doc.fill", "doc.richtext.fill"),
+        ("QR", "QR 코드", "qrcode.viewfinder", "qrcode"),
+        ("여행", "지도", "airplane", "map.fill")
     ]
 
     var body: some View {
         VStack(spacing: 0) {
-            ForEach(Array(options.enumerated()), id: \.offset) { index, option in
-                HStack(spacing: 12) {
-                    Image(systemName: option.0)
-                        .foregroundStyle(index == 0 ? Color.accentColor : Color.secondary)
-                        .frame(width: 24)
-                    Text(L10n.text(option.1))
-                        .font(.body.weight(index == 0 ? .semibold : .regular))
-                    Spacer()
-                    if index == 0 {
-                        Image(systemName: "checkmark")
-                            .fontWeight(.semibold)
-                            .foregroundStyle(Color.accentColor)
-                    }
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                OutputRow(
+                    source: L10n.text(row.0),
+                    result: L10n.text(row.1),
+                    sourceSymbol: row.2,
+                    resultSymbol: row.3
+                )
+                if index < rows.count - 1 {
+                    Divider().padding(.horizontal, 14)
                 }
-                .padding(.horizontal, 16)
-                .frame(minHeight: 52)
-                if index < options.count - 1 { Divider().padding(.leading, 52) }
             }
-
-            Divider()
-
-            Label(L10n.text("고정하거나 다시 알림을 받을 수도 있어요."), systemImage: "pin.fill")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
         }
+        .padding(.vertical, 4)
+        .background(.background, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.separator.opacity(0.35)))
+        .accessibilityElement(children: .contain)
+    }
+}
+
+private struct OutputRow: View {
+    let source: String
+    let result: String
+    let sourceSymbol: String
+    let resultSymbol: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Label(source, systemImage: sourceSymbol)
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Image(systemName: "arrow.forward")
+                .foregroundStyle(.secondary)
+
+            Label(result, systemImage: resultSymbol)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 64)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(source), \(result)")
+    }
+}
+
+private struct AutomationPreview: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    var body: some View {
+        LazyVGrid(
+            columns: Array(
+                repeating: GridItem(.flexible(), spacing: 12),
+                count: horizontalSizeClass == .regular ? 2 : 1
+            ),
+            alignment: .leading,
+            spacing: 12
+        ) {
+            retentionCard
+            albumRuleCard
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var retentionCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Label(L10n.text("보관 기간"), systemImage: "clock.arrow.circlepath")
+                .font(.headline)
+                .padding(.bottom, 8)
+
+            RetentionChoice(title: L10n.text("계속 보관"), selected: true)
+            RetentionChoice(title: L10n.text("완료할 때까지"), selected: false)
+            RetentionChoice(title: L10n.text("7일"), selected: false)
+            RetentionChoice(title: L10n.text("30일"), selected: false)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(.background, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.separator.opacity(0.35)))
         .accessibilityElement(children: .combine)
+    }
+
+    private var albumRuleCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(L10n.text("내 앨범 규칙"), systemImage: "rectangle.stack.badge.gearshape")
+                .font(.headline)
+
+            LabeledContent(L10n.text("보관 기간")) {
+                Text(L10n.text("완료할 때까지"))
+                    .foregroundStyle(.secondary)
+            }
+            Divider()
+            LabeledContent(L10n.text("완료 후 정리")) {
+                Label(L10n.text("켬"), systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(Color.accentColor)
+                    .labelStyle(.titleAndIcon)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
+        .background(.background, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.separator.opacity(0.35)))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct RetentionChoice: View {
+    let title: String
+    let selected: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.subheadline.weight(selected ? .semibold : .regular))
+            Spacer()
+        }
+        .frame(minHeight: 34)
     }
 }
 
@@ -257,11 +447,11 @@ private struct MiniPanel<Content: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             Label(title, systemImage: symbol)
                 .font(.caption.bold())
-                .lineLimit(1)
+                .fixedSize(horizontal: false, vertical: true)
             content
         }
         .padding(10)
-        .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 184, alignment: .topLeading)
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
@@ -275,66 +465,23 @@ private struct PreviewThumbnail: View {
             .font(.title3)
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
-            .frame(height: 62)
+            .frame(height: 61)
             .background(color.opacity(0.78), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
 
-private struct MiniAlbumCard: View {
-    let title: String
-    let detail: String
-    let color: Color
-    let symbol: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: symbol)
-                .foregroundStyle(.white)
-                .frame(width: 42, height: 54)
-                .background(color.opacity(0.78), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.caption.bold()).lineLimit(1)
-                Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer(minLength: 0)
-        }
-    }
-}
-
-private struct SourceButton: View {
+private struct MiniPurposeRow: View {
     let title: String
     let symbol: String
 
     var body: some View {
         Label(title, systemImage: symbol)
-            .font(.subheadline.weight(.semibold))
-            .lineLimit(1)
-            .minimumScaleFactor(0.75)
-            .frame(maxWidth: .infinity)
-            .frame(height: 48)
-            .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.accentColor.opacity(0.3)))
-    }
-}
-
-private struct DestinationRow: View {
-    let title: String
-    let retention: String
-    let symbol: String
-    let color: Color
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .foregroundStyle(.white)
-                .frame(width: 32, height: 32)
-                .background(color, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            Text(title).fontWeight(.semibold)
-            Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
-            Spacer()
-            Text(retention).font(.subheadline).foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 14)
-        .frame(minHeight: 56)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.primary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .frame(minHeight: 38)
+            .background(.background, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 }

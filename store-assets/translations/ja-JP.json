@@ -1,0 +1,15 @@
+{
+  "locale": "ja-JP",
+  "language": "ja",
+  "appleLocale": "ja_JP",
+  "direction": "ltr",
+  "frames": [
+    {"frame": 1, "filename": "01-separate.png", "route": "library", "headline": "必要な写真だけを\n写真アプリと分けて保存", "support": "選んだ写真や動画をSubGalleryだけにまとめて保管できます。"},
+    {"frame": 2, "filename": "02-templates.png", "route": "workflows", "headline": "写真の目的ごとに\n使い方を変える", "support": "レシート・書類・QR・旅行を目的別の機能で管理できます。"},
+    {"frame": 3, "filename": "03-receipts.png", "route": "receipt-report", "headline": "レシートから\n支出レポートへ", "support": "支払金額をまとめて、支出の流れや傾向を確認できます。"},
+    {"frame": 4, "filename": "04-documents.png", "route": "document-pdf", "headline": "複数ページを\n1つのPDFに", "support": "書類をスキャンして、複数ページを1つのPDFにまとめます。"},
+    {"frame": 5, "filename": "05-qr.png", "route": "qr-builder", "headline": "QRコードも\n自分で作成", "support": "リンク・Wi-Fi・連絡先をQRコードにして保存できます。"},
+    {"frame": 6, "filename": "06-travel-map.png", "route": "travel-map", "headline": "旅の写真を\n地図でもう一度", "support": "写真の場所と旅の流れを地図とタイムラインで振り返れます。"},
+    {"frame": 7, "filename": "07-album-automation.png", "route": "album-automation", "headline": "自分のアルバムも\nルールで管理", "support": "保存期間と自動整理のルールをアルバムごとに設定できます。"}
+  ]
+}

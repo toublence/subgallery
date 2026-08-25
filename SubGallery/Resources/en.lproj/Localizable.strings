@@ -428,6 +428,7 @@
 "구매가 복원되었습니다." = "Your purchases have been restored.";
 "복원할 구매가 없습니다." = "No purchases were found to restore.";
 "현재 플랜" = "Current Plan";
+"구독 관리" = "Manage Subscription";
 "플랜 선택" = "Choose a Plan";
 "사진은 따로. 정리는 자동으로." = "Photos stay separate. Organization happens automatically.";
 "자동 정리, iCloud 동기화, 고급 관리 기능으로 SubGallery를 더 편하게 사용하세요." = "Use SubGallery more easily with automatic organization, iCloud sync, and advanced management tools.";
@@ -743,3 +744,19 @@
 "글자 검색 켬" = "text search on";
 "글자 검색 끔" = "text search off";
 "이 앨범의 기존 사진 %d장에 %@ 규칙을 적용할까요?" = "Apply the %2$@ rule to %1$d existing photos in this album?";
+
+/* Onboarding */
+"%d/4단계" = "Step %d of 4";
+"필요한 사진만 따로 보관하세요" = "Keep only the photos you need separate";
+"기본 사진 앱에 섞고 싶지 않은 사진과 동영상을 SubGallery에 따로 보관하세요." = "Keep photos and videos you don’t want mixed into Apple Photos separately in SubGallery.";
+"사진의 목적에 맞게 관리하세요" = "Manage photos by purpose";
+"영수증 · 문서 · QR · 여행처럼 사진의 용도에 맞는 도구를 사용할 수 있어요." = "Use tools designed for receipts, documents, QR codes, and travel photos.";
+"스캔 · PDF" = "Scan · PDF";
+"읽기 · 만들기" = "Read · Create";
+"사진을 보관하는 데서 끝나지 않아요" = "Do more than store photos";
+"사진의 목적에 맞게 필요한 결과로 활용할 수 있어요." = "Turn photos into the results you need for each purpose.";
+"필요한 동안만 보관하고 알아서 정리하세요" = "Keep them as long as needed, then tidy up automatically";
+"보관 기간을 정하고 완료한 사진을 정리하세요. 내 앨범에는 관리 규칙도 설정할 수 있어요." = "Set a retention period and clean up completed photos. You can also set management rules for My Albums.";
+"내 앨범 규칙" = "My Album Rules";
+"완료 후 정리" = "Clean Up After Completion";
+"켬" = "On";

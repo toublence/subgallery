@@ -1,0 +1,15 @@
+{
+  "locale": "ko-KR",
+  "language": "ko",
+  "appleLocale": "ko_KR",
+  "direction": "ltr",
+  "frames": [
+    {"frame": 1, "filename": "01-separate.png", "route": "library", "headline": "필요한 사진만\n따로 보관하세요", "support": "사진 앱과 섞지 않고 SubGallery에 따로 보관하세요."},
+    {"frame": 2, "filename": "02-templates.png", "route": "workflows", "headline": "사진의 목적에 맞게\n다르게 관리", "support": "영수증 · 문서 · QR · 여행을 목적별 기능으로 관리하세요."},
+    {"frame": 3, "filename": "03-receipts.png", "route": "receipt-report", "headline": "영수증이\n지출 리포트로", "support": "승인 금액을 모아 지출 흐름과 결제 패턴을 확인하세요."},
+    {"frame": 4, "filename": "04-documents.png", "route": "document-pdf", "headline": "사진을 모아\n하나의 PDF로", "support": "문서를 스캔하고 여러 페이지를 하나의 PDF로 만드세요."},
+    {"frame": 5, "filename": "05-qr.png", "route": "qr-builder", "headline": "QR도\n직접 만들어 보세요", "support": "링크 · Wi-Fi · 연락처를 QR로 만들어 보관하세요."},
+    {"frame": 6, "filename": "06-travel-map.png", "route": "travel-map", "headline": "여행 사진을\n지도 위에서 다시", "support": "사진 위치와 여행의 흐름을 지도와 타임라인으로 확인하세요."},
+    {"frame": 7, "filename": "07-album-automation.png", "route": "album-automation", "headline": "내 앨범도\n규칙대로 관리", "support": "보관 기간과 자동 정리 규칙을 앨범마다 설정하세요."}
+  ]
+}

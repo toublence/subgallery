@@ -72,6 +72,7 @@
 "구매가 복원되었습니다." = "Deine Käufe wurden wiederhergestellt.";
 "복원할 구매가 없습니다." = "Keine Käufe zum Wiederherstellen gefunden.";
 "현재 플랜" = "Aktueller Tarif";
+"구독 관리" = "Abonnement verwalten";
 "플랜 선택" = "Tarif auswählen";
 "사진은 따로. 정리는 자동으로." = "Fotos separat. Ordnung automatisch.";
 "자동 정리, iCloud 동기화, 고급 관리 기능으로 SubGallery를 더 편하게 사용하세요." = "Nutze SubGallery komfortabler mit automatischer Organisation, iCloud-Synchronisierung und erweiterten Verwaltungsfunktionen.";
@@ -392,3 +393,21 @@
 "글자 검색 켬" = "Textsuche an";
 "글자 검색 끔" = "Textsuche aus";
 "이 앨범의 기존 사진 %d장에 %@ 규칙을 적용할까요?" = "Regel „%2$@“ auf %1$d vorhandene Fotos anwenden?";
+
+/* Onboarding */
+"%d/4단계" = "Schritt %d von 4";
+"필요한 사진만 따로 보관하세요" = "Nur benötigte Fotos separat aufbewahren";
+"기본 사진 앱에 섞고 싶지 않은 사진과 동영상을 SubGallery에 따로 보관하세요." = "Bewahre Fotos und Videos, die du nicht mit Apple Fotos mischen möchtest, separat in SubGallery auf.";
+"사진의 목적에 맞게 관리하세요" = "Fotos passend zu ihrem Zweck verwalten";
+"영수증 · 문서 · QR · 여행처럼 사진의 용도에 맞는 도구를 사용할 수 있어요." = "Nutze passende Werkzeuge für Belege, Dokumente, QR-Codes und Reisen.";
+"스캔 · PDF" = "Scannen · PDF";
+"읽기 · 만들기" = "Lesen · Erstellen";
+"사진을 보관하는 데서 끝나지 않아요" = "Mehr als nur Fotos aufbewahren";
+"사진의 목적에 맞게 필요한 결과로 활용할 수 있어요." = "Nutze deine Fotos für die Ergebnisse, die du jeweils brauchst.";
+"QR 코드" = "QR-Code";
+"지도" = "Karte";
+"필요한 동안만 보관하고 알아서 정리하세요" = "So lange wie nötig aufbewahren und automatisch aufräumen";
+"보관 기간을 정하고 완료한 사진을 정리하세요. 내 앨범에는 관리 규칙도 설정할 수 있어요." = "Lege die Aufbewahrungsdauer fest und räume erledigte Fotos auf. Für Meine Alben kannst du auch Verwaltungsregeln festlegen.";
+"내 앨범 규칙" = "Regeln für meine Alben";
+"완료 후 정리" = "Nach Abschluss aufräumen";
+"켬" = "Ein";

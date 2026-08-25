@@ -21,7 +21,7 @@ extension Notification.Name {
 }
 
 enum StoreScreenshotMode {
-    #if DEBUG
+    #if DEBUG || STORE_SCREENSHOTS
     static let isEnabled = ProcessInfo.processInfo.arguments.contains("-store-screenshot")
     #else
     static let isEnabled = false
@@ -179,6 +179,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        if StoreScreenshotMode.isEnabled {
+            UNUserNotificationCenter.current().delegate = self
+            return true
+        }
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()
         }
@@ -280,6 +284,21 @@ struct SubGalleryApp: App {
             ZStack {
                 if let errorMessage = dataStore.errorMessage {
                     DataStoreErrorView(message: errorMessage)
+                } else if StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "receipt-report" {
+                    StoreReceiptReportScreenshotHost()
+                } else if StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "document-pdf" {
+                    StoreDocumentScreenshotHost()
+                } else if StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "qr-builder" {
+                    QRCodeBuilderView()
+                } else if StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "travel-map" {
+                    NavigationStack {
+                        MediaMapView(
+                            templatePurpose: .travel,
+                            title: CapturePurpose.travel.title
+                        )
+                    }
+                } else if StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "album-automation" {
+                    StoreAlbumAutomationScreenshotHost()
                 } else if StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "camera" {
                     CameraView(context: captureContext) { destination in
                         requestedLibraryDestination = destination
@@ -380,6 +399,7 @@ struct SubGalleryApp: App {
                     applyStoreScreenshotRoute()
                     return
                 }
+                SubGalleryAnalytics.prepareFirstRunTiming()
                 ReviewPromptPolicy.recordActiveDay()
                 await PurchaseManager.shared.refreshEntitlements()
                 updateCloudKitSessionStatus()
@@ -541,10 +561,24 @@ struct SubGalleryApp: App {
 
     @MainActor
     private func prepareStoreScreenshotFixture() async {
+        try? FileManager.default.removeItem(at: MediaStorage.rootURL)
         let context = dataStore.container.mainContext
         let calendar = Calendar(identifier: .gregorian)
         let baseDate = calendar.date(from: DateComponents(year: 2026, month: 8, day: 20, hour: 10)) ?? .now
         let names = localizedStoreFixtureNames()
+        let projectAlbum = Album(
+            name: localizedStoreProjectAlbumName(),
+            sortOrder: 0,
+            defaultRetention: .thirtyDays
+        )
+        projectAlbum.ocrEnabled = true
+        projectAlbum.savesLocation = true
+        projectAlbum.autoPins = false
+        projectAlbum.autoCleanupEnabled = false
+        context.insert(projectAlbum)
+
+        let travelCoordinates = localizedStoreTravelCoordinates()
+        var albumCoverID: UUID?
         let fixtures: [(String, UIColor, UIColor, CapturePurpose, MediaSource, RetentionPolicy, Bool)] = [
             (names[0], .systemTeal, .systemBlue, .travel, .camera, .forever, false),
             (names[1], .systemGreen, .systemTeal, .travel, .camera, .forever, false),
@@ -577,12 +611,96 @@ struct SubGalleryApp: App {
             )
             item.purpose = fixture.3
             item.isPinned = fixture.6
+            if fixture.3 == .travel {
+                let coordinate = travelCoordinates[index % travelCoordinates.count]
+                item.latitude = coordinate.latitude
+                item.longitude = coordinate.longitude
+            }
+            if [4, 5, 7].contains(index) {
+                item.albumID = projectAlbum.id
+                albumCoverID = albumCoverID ?? item.id
+            }
+            if index == 3 {
+                item.receiptMerchant = localizedStoreReceiptMerchants()[0]
+                item.receiptAmount = "\(localizedStoreCurrencyCode()) 18.40"
+                item.receiptDate = calendar.date(byAdding: .day, value: -2, to: baseDate)
+            }
             RetentionService.apply(fixture.5, to: item)
             item.ocrStatus = .completed
             item.recognizedText = fixture.0
             context.insert(item)
         }
+
+        projectAlbum.coverMediaID = albumCoverID
+        if StoreScreenshotMode.screen == "receipt-report" {
+            await insertStoreReceiptFixtures(in: context, baseDate: baseDate, calendar: calendar)
+        }
+        if StoreScreenshotMode.screen == "document-pdf" {
+            await insertStoreDocumentFixture(in: context, baseDate: baseDate)
+        }
         try? context.save()
+    }
+
+    @MainActor
+    private func insertStoreReceiptFixtures(
+        in context: ModelContext,
+        baseDate: Date,
+        calendar: Calendar
+    ) async {
+        let merchants = localizedStoreReceiptMerchants()
+        let values = [42.80, 16.50, 27.25, 74.90, 11.20, 38.60, 23.40, 54.10, 32.70, 19.80, 46.30]
+        let dayOffsets = [-1, -3, -5, -7, -9, -11, -13, -34, -37, -40, -44]
+        let currency = localizedStoreCurrencyCode()
+
+        for index in values.indices {
+            let merchant = merchants[index % merchants.count]
+            let amount = String(format: "%@ %.2f", locale: Locale(identifier: "en_US_POSIX"), currency, values[index])
+            let image = storeReceiptFixtureImage(merchant: merchant, amount: amount, index: index)
+            guard let data = image.jpegData(compressionQuality: 0.95),
+                  let stored = try? await MediaStorage.shared.store(
+                    data: data,
+                    type: .jpeg,
+                    preferredName: "__StoreReceipt_\(index + 1).jpg"
+                  ) else { continue }
+            let date = calendar.date(byAdding: .day, value: dayOffsets[index], to: baseDate) ?? baseDate
+            let item = MediaItem(
+                kind: .photo,
+                source: .camera,
+                localPath: stored.relativePath,
+                thumbnailPath: stored.thumbnailRelativePath,
+                fileName: "\(merchant)-\(index + 1).jpg",
+                createdAt: date,
+                fileSize: stored.fileSize,
+                width: stored.width,
+                height: stored.height
+            )
+            item.templatePurpose = .receipt
+            item.receiptMerchant = merchant
+            item.receiptAmount = amount
+            item.receiptDate = date
+            item.receiptMerchantManuallyEdited = true
+            item.receiptAmountManuallyEdited = true
+            item.receiptDateManuallyEdited = true
+            item.recognizedText = "\(merchant)\nTOTAL \(amount)"
+            item.ocrStatus = .completed
+            item.classificationStatus = .applied
+            context.insert(item)
+        }
+    }
+
+    @MainActor
+    private func insertStoreDocumentFixture(in context: ModelContext, baseDate: Date) async {
+        let title = localizedStoreDocumentTitle()
+        let pages = (1...3).map { DocumentPage(image: storeDocumentFixtureImage(page: $0, title: title)) }
+        guard let built = try? await DocumentBuilderService.build(pages: pages, title: title) else { return }
+        context.insert(Document(
+            title: title,
+            createdAt: baseDate,
+            pageCount: built.pageCount,
+            pdfRelativePath: built.pdfRelativePath,
+            thumbnailRelativePath: built.thumbnailRelativePath,
+            recognizedText: built.recognizedText
+        ))
     }
 
     private func localizedStoreFixtureNames() -> [String] {
@@ -606,6 +724,81 @@ struct SubGalleryApp: App {
         default:
             ["Seattle Trip", "Downtown Seattle", "Seattle Sunset", "Coffee Receipt", "Conference Guide", "Office Note", "Weekend Walk", "Concert Ticket"]
         }
+    }
+
+    private func localizedStoreProjectAlbumName() -> String {
+        switch AppLanguage.selected.resolvedIdentifier {
+        case "de": "Projekt"
+        case "es": "Proyecto"
+        case "fr": "Projet"
+        case "ja": "プロジェクト"
+        case "zh-Hans": "项目"
+        case "zh-Hant": "專案"
+        case "ar": "المشروع"
+        case "ko": "프로젝트"
+        default: "Project"
+        }
+    }
+
+    private func localizedStoreDocumentTitle() -> String {
+        switch AppLanguage.selected.resolvedIdentifier {
+        case "de": "Projektbriefing"
+        case "es": "Resumen del proyecto"
+        case "fr": "Note de projet"
+        case "ja": "プロジェクト資料"
+        case "zh-Hans": "项目简报"
+        case "zh-Hant": "專案簡報"
+        case "ar": "موجز المشروع"
+        case "ko": "프로젝트 브리프"
+        default: "Project Brief"
+        }
+    }
+
+    private func localizedStoreReceiptMerchants() -> [String] {
+        switch AppLanguage.selected.resolvedIdentifier {
+        case "de": ["Stadtcafé", "Buchladen", "Markthalle", "Bäckerei"]
+        case "es": ["Café Central", "Librería", "Mercado", "Panadería"]
+        case "fr": ["Café Central", "Librairie", "Marché", "Boulangerie"]
+        case "ja": ["中央カフェ", "書店", "マーケット", "ベーカリー"]
+        case "zh-Hans": ["中央咖啡", "书店", "市集", "面包店"]
+        case "zh-Hant": ["中央咖啡", "書店", "市集", "麵包店"]
+        case "ar": ["المقهى المركزي", "متجر الكتب", "السوق", "المخبز"]
+        case "ko": ["중앙 카페", "동네 서점", "주말 마켓", "베이커리"]
+        default: ["Central Cafe", "Bookshop", "Market Hall", "Bakery"]
+        }
+    }
+
+    private func localizedStoreCurrencyCode() -> String {
+        switch AppLanguage.selected.resolvedIdentifier {
+        case "ko": "KRW"
+        case "ja": "JPY"
+        case "zh-Hans": "CNY"
+        case "zh-Hant": "TWD"
+        case "ar": "SAR"
+        case "de", "es", "fr": "EUR"
+        default: "USD"
+        }
+    }
+
+    private func localizedStoreTravelCoordinates() -> [(latitude: Double, longitude: Double)] {
+        let center: (Double, Double)
+        switch AppLanguage.selected.resolvedIdentifier {
+        case "de": center = (52.5200, 13.4050)
+        case "es": center = (40.4168, -3.7038)
+        case "fr": center = (48.8566, 2.3522)
+        case "ja": center = (35.6762, 139.6503)
+        case "zh-Hans": center = (31.2304, 121.4737)
+        case "zh-Hant": center = (25.0330, 121.5654)
+        case "ar": center = (25.2048, 55.2708)
+        case "ko": center = (33.4996, 126.5312)
+        default: center = (47.6062, -122.3321)
+        }
+        return [
+            (center.0, center.1),
+            (center.0 + 0.055, center.1 + 0.038),
+            (center.0 - 0.041, center.1 + 0.061),
+            (center.0 + 0.026, center.1 - 0.052)
+        ]
     }
 
     private func storeFixtureImage(
@@ -643,6 +836,76 @@ struct SubGalleryApp: App {
                     .foregroundColor: UIColor.white
                 ]
             )
+        }
+    }
+
+    private func storeReceiptFixtureImage(merchant: String, amount: String, index: Int) -> UIImage {
+        let size = CGSize(width: 1000, height: 1320)
+        return UIGraphicsImageRenderer(size: size).image { renderer in
+            UIColor(white: 0.97, alpha: 1).setFill()
+            renderer.fill(CGRect(origin: .zero, size: size))
+            NSString(string: merchant).draw(
+                in: CGRect(x: 80, y: 120, width: 840, height: 120),
+                withAttributes: [
+                    .font: UIFont.systemFont(ofSize: 64, weight: .bold),
+                    .foregroundColor: UIColor.label
+                ]
+            )
+            NSString(string: "ITEM \(index + 1)\nSUBTOTAL\nTOTAL").draw(
+                in: CGRect(x: 80, y: 360, width: 420, height: 440),
+                withAttributes: [
+                    .font: UIFont.monospacedSystemFont(ofSize: 42, weight: .regular),
+                    .foregroundColor: UIColor.darkGray
+                ]
+            )
+            NSString(string: amount).draw(
+                in: CGRect(x: 80, y: 880, width: 840, height: 120),
+                withAttributes: [
+                    .font: UIFont.monospacedSystemFont(ofSize: 58, weight: .bold),
+                    .foregroundColor: UIColor.label
+                ]
+            )
+        }
+    }
+
+    private func storeDocumentFixtureImage(page: Int, title: String) -> UIImage {
+        let size = CGSize(width: 1240, height: 1754)
+        return UIGraphicsImageRenderer(size: size).image { renderer in
+            UIColor.white.setFill()
+            renderer.fill(CGRect(origin: .zero, size: size))
+            UIColor.systemIndigo.setFill()
+            renderer.fill(CGRect(x: 0, y: 0, width: size.width, height: 28))
+            NSString(string: title).draw(
+                in: CGRect(x: 110, y: 130, width: 1020, height: 150),
+                withAttributes: [
+                    .font: UIFont.systemFont(ofSize: 74, weight: .bold),
+                    .foregroundColor: UIColor.label
+                ]
+            )
+            NSString(string: "PAGE \(page) OF 3").draw(
+                in: CGRect(x: 110, y: 300, width: 1020, height: 70),
+                withAttributes: [
+                    .font: UIFont.monospacedSystemFont(ofSize: 34, weight: .semibold),
+                    .foregroundColor: UIColor.systemIndigo
+                ]
+            )
+            let sectionTitles = ["Overview", "Timeline", "Next Steps"]
+            NSString(string: sectionTitles[page - 1]).draw(
+                in: CGRect(x: 110, y: 470, width: 1020, height: 100),
+                withAttributes: [
+                    .font: UIFont.systemFont(ofSize: 54, weight: .semibold),
+                    .foregroundColor: UIColor.label
+                ]
+            )
+            for row in 0..<6 {
+                let y = 650 + CGFloat(row) * 135
+                UIColor.systemIndigo.withAlphaComponent(0.16 + CGFloat(row % 2) * 0.08).setFill()
+                renderer.fill(CGRect(x: 110, y: y, width: 70, height: 70))
+                UIColor(white: 0.82, alpha: 1).setFill()
+                renderer.fill(CGRect(x: 220, y: y + 6, width: 760 - CGFloat(row % 3) * 100, height: 20))
+                UIColor(white: 0.9, alpha: 1).setFill()
+                renderer.fill(CGRect(x: 220, y: y + 44, width: 860 - CGFloat((row + 1) % 3) * 90, height: 16))
+            }
         }
     }
 
@@ -800,6 +1063,40 @@ private struct StoreAlbumScreenshotHost: View {
                 destination: .template(.travel),
                 isCameraPresented: $isCameraPresented
             )
+        }
+    }
+}
+
+private struct StoreReceiptReportScreenshotHost: View {
+    @Query(sort: \MediaItem.createdAt, order: .reverse) private var media: [MediaItem]
+
+    var body: some View {
+        ReceiptReportView(receipts: media.filter {
+            $0.deletedAt == nil && $0.templatePurpose == .receipt
+        })
+    }
+}
+
+private struct StoreDocumentScreenshotHost: View {
+    @Query(sort: \Document.createdAt, order: .reverse) private var documents: [Document]
+
+    var body: some View {
+        if let document = documents.first {
+            PDFDocumentViewer(document: document)
+        } else {
+            ProgressView()
+        }
+    }
+}
+
+private struct StoreAlbumAutomationScreenshotHost: View {
+    @Query(sort: \Album.sortOrder) private var albums: [Album]
+
+    var body: some View {
+        if let album = albums.first(where: { !$0.isBuiltIn }) {
+            AlbumAutomationView(album: album)
+        } else {
+            ProgressView()
         }
     }
 }

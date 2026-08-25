@@ -1,0 +1,15 @@
+{
+  "locale": "de-DE",
+  "language": "de",
+  "appleLocale": "de_DE",
+  "direction": "ltr",
+  "frames": [
+    {"frame": 1, "filename": "01-separate.png", "route": "library", "headline": "Nur was du brauchst,\ngetrennt von Fotos", "support": "Bewahre ausgewählte Fotos und Videos separat in SubGallery auf."},
+    {"frame": 2, "filename": "02-templates.png", "route": "workflows", "headline": "Für jeden Zweck\nder passende Workflow", "support": "Belege, Dokumente, QR-Codes und Reisen erhalten passende Werkzeuge."},
+    {"frame": 3, "filename": "03-receipts.png", "route": "receipt-report", "headline": "Aus Belegen wird\nein Ausgabenbericht", "support": "Fasse Zahlbeträge zusammen und erkenne Ausgabenverlauf und Muster."},
+    {"frame": 4, "filename": "04-documents.png", "route": "document-pdf", "headline": "Mehrere Seiten,\neine PDF", "support": "Scanne Dokumente und fasse mehrere Seiten in einer PDF zusammen."},
+    {"frame": 5, "filename": "05-qr.png", "route": "qr-builder", "headline": "Eigene QR-Codes\nerstellen", "support": "Verwandle Links, Wi-Fi und Kontakte in QR-Codes und bewahre sie auf."},
+    {"frame": 6, "filename": "06-travel-map.png", "route": "travel-map", "headline": "Reisen auf der Karte\nneu erleben", "support": "Sieh Fotoorte und Reisemomente auf Karte und Zeitleiste."},
+    {"frame": 7, "filename": "07-album-automation.png", "route": "album-automation", "headline": "Deine Alben,\ndeine Regeln", "support": "Lege Aufbewahrung und automatische Bereinigung pro Album fest."}
+  ]
+}

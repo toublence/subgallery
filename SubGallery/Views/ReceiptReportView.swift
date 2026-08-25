@@ -280,6 +280,7 @@ struct ReceiptReportView: View {
     @State private var selection: ReceiptReportSelection?
     @State private var consumedThisSession = false
     @State private var remainingFreeUses = ReceiptReportTrialPolicy.freeUseLimit
+    @State private var loggedRenderTokens = Set<String>()
 
     private var range: ReceiptReportRange {
         ReceiptReportRange(rawValue: rangeRaw) ?? .thisMonth
@@ -398,6 +399,9 @@ struct ReceiptReportView: View {
             remainingFreeUses = ReceiptReportUsageStore.remaining
         }
         .task(id: reportRenderToken) {
+            if !items.isEmpty, loggedRenderTokens.insert(reportRenderToken).inserted {
+                SubGalleryAnalytics.receiptReportRendered(range: analyticsRange)
+            }
             guard !consumedThisSession, !purchases.isPremium, !items.isEmpty else { return }
             try? await Task.sleep(nanoseconds: 350_000_000)
             guard !Task.isCancelled else { return }
@@ -927,6 +931,16 @@ struct ReceiptReportView: View {
 
     private var reportRenderToken: String {
         "\(range.rawValue)|\(items.map { $0.id.uuidString }.joined(separator: ","))"
+    }
+
+    private var analyticsRange: SubGalleryAnalytics.ReportRange {
+        switch range {
+        case .thisMonth: .thisMonth
+        case .lastMonth: .lastMonth
+        case .threeMonths: .threeMonths
+        case .all: .all
+        case .custom: .custom
+        }
     }
 
     private func consumeFreeUseAfterRender() {

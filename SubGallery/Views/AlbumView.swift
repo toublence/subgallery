@@ -129,6 +129,7 @@ struct AlbumView: View {
     @State private var gridMode: AlbumGridMode
     @State private var sortMode: AlbumSortMode
     @State private var filterMode: AlbumFilterMode
+    @State private var didLogOpen = false
 
     init(
         destination: AlbumDestination,
@@ -276,6 +277,7 @@ struct AlbumView: View {
             }
         }
         .onAppear {
+            logDestinationOpenIfNeeded()
             if StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "batch" {
                 selection = Set(items.map(\.id))
             }
@@ -408,10 +410,24 @@ struct AlbumView: View {
             }
         }
         .sheet(isPresented: $showsShareSheet, onDismiss: cleanupPreparedExport) {
-            ActivityShareSheet(urls: preparedExportURLs)
+            ActivityShareSheet(urls: preparedExportURLs) { completed in
+                if completed {
+                    SubGalleryAnalytics.mediaExported(
+                        destination: .share,
+                        metadataRemoved: stripsMetadata && purchases.isPremium
+                    )
+                }
+            }
         }
         .sheet(isPresented: $showsFilesExporter, onDismiss: cleanupPreparedExport) {
-            FilesExportPicker(urls: preparedExportURLs)
+            FilesExportPicker(urls: preparedExportURLs) { completed in
+                if completed {
+                    SubGalleryAnalytics.mediaExported(
+                        destination: .files,
+                        metadataRemoved: stripsMetadata && purchases.isPremium
+                    )
+                }
+            }
         }
         .onChange(of: photosSelection) { _, selection in importPhotos(selection) }
         .sheet(isPresented: $showsDocumentBuilder) {
@@ -569,7 +585,12 @@ struct AlbumView: View {
             open: {
                 // A QR is opened for its information, so the detail screen comes
                 // first; the photo itself stays one tap further in.
-                if isSelecting { toggle(item.id) } else { qrDetailItem = item }
+                if isSelecting {
+                    toggle(item.id)
+                } else {
+                    SubGalleryAnalytics.mediaOpened()
+                    qrDetailItem = item
+                }
             },
             runAction: { info in
                 if let error = QRActionRunner.perform(info, for: item, in: modelContext) {
@@ -633,6 +654,10 @@ struct AlbumView: View {
                 captureAccessibilityLabel: templateCaptureTitle(purpose)
             ) {
                 if purpose == .document {
+                    SubGalleryAnalytics.mediaAddStart(
+                        source: .documentScan, destination: .document,
+                        template: .document, kind: .photo
+                    )
                     showsDocumentScanner = true
                 } else {
                     captureContext = .template(purpose)
@@ -875,11 +900,24 @@ struct AlbumView: View {
 
     private func importPhotos(_ selection: [PhotosPickerItem]) {
         guard !selection.isEmpty else { return }
+        let analytics = analyticsDestinationContext
+        SubGalleryAnalytics.mediaAddStart(
+            source: .photos,
+            destination: analytics.destination,
+            template: analytics.template,
+            kind: .photo
+        )
         Task {
             defer { photosSelection = [] }
             for selectionItem in selection {
                 do {
-                    guard let data = try await selectionItem.loadTransferable(type: Data.self) else { continue }
+                    guard let data = try await selectionItem.loadTransferable(type: Data.self) else {
+                        SubGalleryAnalytics.mediaAddFailed(
+                            source: .photos, destination: analytics.destination,
+                            template: analytics.template, kind: .photo, reason: .decodeFailed
+                        )
+                        continue
+                    }
                     let stored = try await MediaStorage.shared.store(
                         data: data,
                         type: selectionItem.supportedContentTypes.first
@@ -890,6 +928,10 @@ struct AlbumView: View {
                         try await insert(stored, into: purpose)
                     }
                 } catch {
+                    SubGalleryAnalytics.mediaAddFailed(
+                        source: .photos, destination: analytics.destination,
+                        template: analytics.template, kind: .photo, reason: .storageFailed
+                    )
                     importError = error.localizedDescription
                 }
             }
@@ -908,17 +950,39 @@ struct AlbumView: View {
                     stored, source: .photos, purpose: purpose,
                     in: modelContext, analysis: analysis
                 )
+                SubGalleryAnalytics.qrDetected(
+                    SubGalleryAnalytics.qrType(
+                        analysis.qrCodes.first.map(QRContentService.parse)?.type ?? .unknown
+                    )
+                )
+                SubGalleryAnalytics.mediaAddSuccess(
+                    source: .photos, destination: .qr, template: .qr, kind: .photo
+                )
             }
         } else {
             await MainActor.run {
-                _ = TemplateCapturePipeline.insert(
+                let item = TemplateCapturePipeline.insert(
                     stored, source: .photos, purpose: purpose, in: modelContext
                 )
+                let template = SubGalleryAnalytics.Template(purpose)
+                let destination = SubGalleryAnalytics.Destination(rawValue: purpose.rawValue) ?? .general
+                SubGalleryAnalytics.mediaAddSuccess(
+                    source: .photos, destination: destination,
+                    template: template, kind: stored.kind == .video ? .video : .photo
+                )
+                if purpose == .travel {
+                    if item.latitude != nil, item.longitude != nil {
+                        SubGalleryAnalytics.travelLocationSaved(source: .exif)
+                    } else {
+                        SubGalleryAnalytics.travelLocationFailed(.metadataMissing)
+                    }
+                }
             }
         }
     }
 
     private func importScannedDocuments(_ images: [UIImage]) {
+        guard !images.isEmpty else { return }
         Task {
             for (index, image) in images.enumerated() {
                 guard let data = image.jpegData(compressionQuality: 0.95) else { continue }
@@ -931,8 +995,16 @@ struct AlbumView: View {
                         _ = TemplateCapturePipeline.insert(
                             stored, source: .camera, purpose: .document, in: modelContext
                         )
+                        SubGalleryAnalytics.mediaAddSuccess(
+                            source: .documentScan, destination: .document,
+                            template: .document, kind: .photo
+                        )
                     }
                 } catch {
+                    SubGalleryAnalytics.mediaAddFailed(
+                        source: .documentScan, destination: .document,
+                        template: .document, kind: .photo, reason: .storageFailed
+                    )
                     await MainActor.run { importError = error.localizedDescription }
                 }
             }
@@ -957,6 +1029,7 @@ struct AlbumView: View {
                     item.latitude = latitude
                     item.longitude = longitude
                     if let capturedAt = metadata.capturedAt { item.createdAt = capturedAt }
+                    SubGalleryAnalytics.travelLocationSaved(source: .exif)
                     hasLocationData = true
                     changed = true
                 }
@@ -992,8 +1065,47 @@ struct AlbumView: View {
         item.isPinned = album.autoPins
         RetentionService.apply(album.defaultRetention, customDate: album.defaultRetentionDate, to: item)
         modelContext.insert(item)
-        try? modelContext.save()
+        guard (try? modelContext.save()) != nil else {
+            SubGalleryAnalytics.mediaAddFailed(
+                source: .photos, destination: .userAlbum, template: nil,
+                kind: stored.kind == .video ? .video : .photo, reason: .saveFailed
+            )
+            return
+        }
+        SubGalleryAnalytics.mediaAddSuccess(
+            source: .photos, destination: .userAlbum, template: nil,
+            kind: stored.kind == .video ? .video : .photo
+        )
         OCRService.enqueue(item, in: modelContext)
+    }
+
+    private var analyticsDestinationContext: (
+        destination: SubGalleryAnalytics.Destination,
+        template: SubGalleryAnalytics.Template?
+    ) {
+        switch destination {
+        case .user: (.userAlbum, nil)
+        case .template(let purpose):
+            (SubGalleryAnalytics.Destination(rawValue: purpose.rawValue) ?? .general,
+             SubGalleryAnalytics.Template(purpose))
+        case .smart(.temporary): (.temporary, nil)
+        case .smart: (.general, nil)
+        }
+    }
+
+    private func logDestinationOpenIfNeeded() {
+        guard !didLogOpen else { return }
+        didLogOpen = true
+        switch destination {
+        case .template(let purpose):
+            if let template = SubGalleryAnalytics.Template(purpose) {
+                SubGalleryAnalytics.templateOpen(template)
+            }
+        case .user:
+            SubGalleryAnalytics.albumOpen(.user)
+        case .smart:
+            SubGalleryAnalytics.albumOpen(.smart)
+        }
     }
 }
 
@@ -1032,6 +1144,7 @@ struct DocumentScannerView: UIViewControllerRepresentable {
             didFinishWith scan: VNDocumentCameraScan
         ) {
             let images = (0..<scan.pageCount).map { scan.imageOfPage(at: $0) }
+            SubGalleryAnalytics.documentScanSuccess(pageCount: scan.pageCount)
             parent.completion(images)
             parent.dismiss()
         }

@@ -1,0 +1,46 @@
+{
+  "passed": true,
+  "finalPngCount": 126,
+  "sourcePngCount": 126,
+  "locales": [
+    "ko-KR",
+    "en-US",
+    "de-DE",
+    "es-ES",
+    "ar-SA",
+    "ja-JP",
+    "zh-Hans",
+    "zh-Hant",
+    "fr-FR"
+  ],
+  "devices": {
+    "iphone": [
+      1242,
+      2688
+    ],
+    "ipad": [
+      2064,
+      2752
+    ]
+  },
+  "filenames": [
+    "01-separate.png",
+    "02-templates.png",
+    "03-receipts.png",
+    "04-documents.png",
+    "05-qr.png",
+    "06-travel-map.png",
+    "07-album-automation.png"
+  ],
+  "checks": {
+    "exactCount": true,
+    "dimensions": true,
+    "nativeIPadSources": true,
+    "distinctRoutes": true,
+    "separateDeviceCaptures": true,
+    "marketingTextFits": true,
+    "forbiddenClaimsAbsent": true,
+    "arabicRTL": true
+  },
+  "errors": []
+}

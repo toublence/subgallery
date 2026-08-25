@@ -103,6 +103,8 @@ struct MediaMapView: View {
     @State private var mapPresentation: MapPresentation = .regions
     @State private var consumedTrialThisSession = false
     @State private var showsFreeLimitNotice = false
+    @State private var didLogOpen = false
+    @State private var didLogRendered = false
     @AppStorage("camera.saveLocation") private var savesLocation = false
 
     private var allLocatedItems: [MediaItem] {
@@ -161,7 +163,16 @@ struct MediaMapView: View {
         }
         .task {
             await backfillStoredMetadata()
+            if !didLogRendered, !allLocatedItems.isEmpty {
+                didLogRendered = true
+                SubGalleryAnalytics.travelMapRendered()
+            }
             consumeTrialAfterMapIsReady()
+        }
+        .onAppear {
+            guard !didLogOpen else { return }
+            didLogOpen = true
+            SubGalleryAnalytics.travelMapOpen()
         }
         .alert(L10n.text("무료 여행 지도를 모두 사용했습니다."), isPresented: $showsFreeLimitNotice) {
             Button(L10n.text("확인"), role: .cancel) { }
@@ -610,10 +621,14 @@ struct MediaMapView: View {
             && (item.latitude == nil || item.longitude == nil) {
             _ = item.mediaURL
             let metadata = await MediaStorage.shared.metadata(for: item.localPath)
-            guard let latitude = metadata.latitude, let longitude = metadata.longitude else { continue }
+            guard let latitude = metadata.latitude, let longitude = metadata.longitude else {
+                SubGalleryAnalytics.travelLocationFailed(.metadataMissing)
+                continue
+            }
             item.latitude = latitude
             item.longitude = longitude
             if let capturedAt = metadata.capturedAt { item.createdAt = capturedAt }
+            SubGalleryAnalytics.travelLocationSaved(source: .exif)
             changed = true
         }
         if changed { try? modelContext.save() }

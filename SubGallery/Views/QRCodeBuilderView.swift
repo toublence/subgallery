@@ -34,12 +34,19 @@ struct QRCodeBuilderView: View {
     @State private var didConsumeFreeUse = false
     @State private var savedItemID: UUID?
     @State private var showsFreeLimitNotice = false
+    @State private var didLogOpen = false
 
     private struct Preview: Identifiable {
         let id = UUID()
         let payload: String
         let image: UIImage
         let kind: QRBuilderKind
+    }
+
+    init() {
+        let usesStoreFixture = StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "qr-builder"
+        _kind = State(initialValue: usesStoreFixture ? .url : nil)
+        _urlText = State(initialValue: usesStoreFixture ? "https://example.com/travel-notes" : "")
     }
 
     var body: some View {
@@ -83,6 +90,17 @@ struct QRCodeBuilderView: View {
             Button(L10n.text("확인"), role: .cancel) { }
         } message: {
             Text(L10n.text("다음 QR부터 Premium이 필요합니다."))
+        }
+        .task {
+            if !didLogOpen {
+                didLogOpen = true
+                SubGalleryAnalytics.qrBuilderOpen()
+            }
+            guard StoreScreenshotMode.isEnabled,
+                  StoreScreenshotMode.screen == "qr-builder",
+                  preview == nil else { return }
+            await Task.yield()
+            generate()
         }
     }
 
@@ -218,6 +236,7 @@ struct QRCodeBuilderView: View {
             didConsumeFreeUse = false
             preview = Preview(payload: payload, image: image, kind: kind)
         } catch {
+            SubGalleryAnalytics.qrCreateFailed(qrFailureReason(error))
             message = error.localizedDescription
         }
     }
@@ -240,6 +259,10 @@ struct QRCodeBuilderView: View {
     private func save(_ preview: Preview) {
         guard savedItemID == nil, !isSaving else { return }
         isSaving = true
+        let qrType = SubGalleryAnalytics.qrType(preview.kind)
+        SubGalleryAnalytics.mediaAddStart(
+            source: .qrBuilder, destination: .qr, template: .qr, kind: .photo
+        )
         Task {
             do {
                 guard let data = preview.image.pngData() else {
@@ -278,8 +301,19 @@ struct QRCodeBuilderView: View {
                     } catch {
                         isSaving = false
                         message = L10n.text("QR을 저장할 수 없습니다.")
+                        SubGalleryAnalytics.qrCreateFailed(.saveFailed)
+                        SubGalleryAnalytics.mediaAddFailed(
+                            source: .qrBuilder, destination: .qr,
+                            template: .qr, kind: .photo, reason: .saveFailed
+                        )
                         return
                     }
+
+                    SubGalleryAnalytics.qrCreateSuccess(qrType)
+                    SubGalleryAnalytics.mediaAddSuccess(
+                        source: .qrBuilder, destination: .qr,
+                        template: .qr, kind: .photo
+                    )
 
                     let wasLastFreeUse = QRBuilderUsageStore.isLastFreeUse(
                         isPremium: purchases.isPremium
@@ -306,8 +340,21 @@ struct QRCodeBuilderView: View {
                 await MainActor.run {
                     isSaving = false
                     message = error.localizedDescription
+                    SubGalleryAnalytics.qrCreateFailed(qrFailureReason(error))
+                    SubGalleryAnalytics.mediaAddFailed(
+                        source: .qrBuilder, destination: .qr,
+                        template: .qr, kind: .photo, reason: .storageFailed
+                    )
                 }
             }
+        }
+    }
+
+    private func qrFailureReason(_ error: Error) -> SubGalleryAnalytics.BuilderFailureReason {
+        guard let error = error as? QRCodeBuilderError else { return .unknown }
+        switch error {
+        case .invalidURL, .emptyValue, .invalidEmail, .invalidCoordinate: .invalidInput
+        case .renderFailed: .renderFailed
         }
     }
 }

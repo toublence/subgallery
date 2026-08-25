@@ -11,10 +11,11 @@ struct AlbumAutomationView: View {
     let album: Album
 
     @State private var customDate: Date
+    @State private var showsPremium = false
     @State private var showsRetroactiveConfirmation = false
     @State private var showsSuggestions = false
-    @State private var showsPremium = false
     @State private var message: String?
+    @State private var didLogOpen = false
 
     init(album: Album) {
         self.album = album
@@ -62,6 +63,11 @@ struct AlbumAutomationView: View {
         .onChange(of: purchases.isPremium) { _, isPremium in
             if isPremium, showsPremium { showsPremium = false }
         }
+        .onAppear {
+            guard !didLogOpen else { return }
+            didLogOpen = true
+            SubGalleryAnalytics.albumAutomationOpen()
+        }
         .confirmationDialog(
             L10n.format(
                 "이 앨범의 기존 사진 %d장에 %@ 규칙을 적용할까요?",
@@ -93,7 +99,7 @@ struct AlbumAutomationView: View {
             Picker(L10n.text("보관 기간"), selection: Binding(
                 get: { album.defaultRetention },
                 set: { policy in
-                    update {
+                    update(rule: .retention) {
                         album.defaultRetention = policy
                         album.defaultRetentionDate = policy == .customDate ? customDate : nil
                     }
@@ -109,22 +115,25 @@ struct AlbumAutomationView: View {
                     displayedComponents: [.date, .hourAndMinute]
                 )
                 .onChange(of: customDate) { _, date in
-                    update { album.defaultRetentionDate = date }
+                    update(rule: .retention) { album.defaultRetentionDate = date }
                 }
             }
             // "사진 속 글자 검색" rather than "OCR": the setting is named for what the
             // user gets, not for the technology.
             Toggle(L10n.text("사진 속 글자 검색"), isOn: binding(
                 get: { album.ocrEnabled },
-                set: { album.ocrEnabled = $0 }
+                set: { album.ocrEnabled = $0 },
+                rule: .ocr
             ))
             Toggle(L10n.text("촬영 위치 저장"), isOn: binding(
                 get: { album.savesLocation },
-                set: { album.savesLocation = $0 }
+                set: { album.savesLocation = $0 },
+                rule: .location
             ))
             Toggle(L10n.text("새 사진 자동 고정"), isOn: binding(
                 get: { album.autoPins },
-                set: { album.autoPins = $0 }
+                set: { album.autoPins = $0 },
+                rule: .pin
             ))
         }
     }
@@ -139,7 +148,9 @@ struct AlbumAutomationView: View {
                         showsPremium = true
                         return
                     }
-                    update { album.autoCleanupEnabled = enabled }
+                    update(rule: .completion, level: .advanced) {
+                        album.autoCleanupEnabled = enabled
+                    }
                 }
             )) {
                 Text(L10n.text("직접 완료")).tag(false)
@@ -206,6 +217,7 @@ struct AlbumAutomationView: View {
             media: media,
             context: modelContext
         )
+        SubGalleryAnalytics.albumAutomationChanged(level: .basic, rule: .retention)
         message = L10n.format("사진 %d장에 적용했습니다.", count)
     }
 
@@ -213,17 +225,23 @@ struct AlbumAutomationView: View {
 
     private func binding<Value>(
         get: @escaping () -> Value,
-        set: @escaping (Value) -> Void
+        set: @escaping (Value) -> Void,
+        rule: SubGalleryAnalytics.AutomationRule
     ) -> Binding<Value> {
-        Binding(get: get, set: { value in update { set(value) } })
+        Binding(get: get, set: { value in update(rule: rule) { set(value) } })
     }
 
     /// Saved immediately — there is no Save button. A failed write is rolled back so
     /// the switch never shows a value the album does not actually have.
-    private func update(_ change: () -> Void) {
+    private func update(
+        rule: SubGalleryAnalytics.AutomationRule,
+        level: SubGalleryAnalytics.AutomationLevel = .basic,
+        _ change: () -> Void
+    ) {
         change()
         do {
             try modelContext.save()
+            SubGalleryAnalytics.albumAutomationChanged(level: level, rule: rule)
         } catch {
             modelContext.rollback()
             message = error.localizedDescription

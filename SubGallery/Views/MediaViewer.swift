@@ -63,6 +63,7 @@ struct MediaViewer: View {
     @State private var showsPremium = false
     @State private var premiumEntryPoint = PremiumEntryPoint.general
     @State private var showsReceiptEditor = false
+    @State private var didLogOpen = false
 
     init(items: [MediaItem], initialID: UUID, isRecentlyDeleted: Bool) {
         self.items = items
@@ -137,6 +138,12 @@ struct MediaViewer: View {
         }
         .sheet(isPresented: $showsShareSheet, onDismiss: cleanupPreparedShare) {
             ActivityShareSheet(urls: preparedShareURLs) { completed in
+                if completed {
+                    SubGalleryAnalytics.mediaExported(
+                        destination: .share,
+                        metadataRemoved: stripsMetadata && purchases.isPremium
+                    )
+                }
                 guard completed, completesAfterShare,
                       let id = shareTargetID,
                       let item = items.first(where: { $0.id == id }) else { return }
@@ -168,6 +175,11 @@ struct MediaViewer: View {
             Button(L10n.text("확인"), role: .cancel) { }
         } message: {
             Text(actionMessage ?? "")
+        }
+        .onAppear {
+            guard !didLogOpen else { return }
+            didLogOpen = true
+            SubGalleryAnalytics.mediaOpened()
         }
     }
 

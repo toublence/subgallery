@@ -20,6 +20,7 @@
 		39ECD60577F267B40BE40536 /* RetentionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C11E7C2B32572F1741D84C /* RetentionService.swift */; };
 		3E57BD355CA4963B21F233E7 /* AlbumView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 184CA5849600E1B32CD7E54A /* AlbumView.swift */; };
 		404B0EC6029434DB874EC510 /* ReminderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E6A5E7050A65C1316E1469 /* ReminderService.swift */; };
+		40A7C5D9E2B148F6A3C7D921 /* SubGalleryAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B4E8F1C6D943A5B0E2F718 /* SubGalleryAnalytics.swift */; };
 		4501387BCA4E6C225D6E532B /* ReceiptTemplateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0419DE9C25D08523D83F6095 /* ReceiptTemplateView.swift */; };
 		473E61C2D1CEF02CB75D8661 /* DocumentBuilderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 315E83B742D928104844FD65 /* DocumentBuilderView.swift */; };
 		485DE72CB54A3204951731EE /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = F163423CB6412109ABE85076 /* FirebaseAnalytics */; };
@@ -96,6 +97,7 @@
 		66ED8057FACAAE1C2EE442C9 /* ar */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ar; path = ar.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		6E2806722EB9767CD5B284A3 /* PremiumView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumView.swift; sourceTree = "<group>"; };
 		6F2FB9CBB91F0C4F0F4F6F53 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		72B4E8F1C6D943A5B0E2F718 /* SubGalleryAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubGalleryAnalytics.swift; sourceTree = "<group>"; };
 		76682787ED7CE82DB4F34874 /* de */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = de; path = de.lproj/Localizable.strings; sourceTree = "<group>"; };
 		7B175990DE9BAA2C242F4BCE /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		7B68C1E5FC9C4C887734FB62 /* ReminderFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderFlowUITests.swift; sourceTree = "<group>"; };
@@ -257,6 +259,7 @@
 				93EF563772AD6AD8F4B5C690 /* ReceiptSummaryService.swift */,
 				A5E6A5E7050A65C1316E1469 /* ReminderService.swift */,
 				E2C11E7C2B32572F1741D84C /* RetentionService.swift */,
+				72B4E8F1C6D943A5B0E2F718 /* SubGalleryAnalytics.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -443,6 +446,7 @@
 				4501387BCA4E6C225D6E532B /* ReceiptTemplateView.swift in Sources */,
 				404B0EC6029434DB874EC510 /* ReminderService.swift in Sources */,
 				39ECD60577F267B40BE40536 /* RetentionService.swift in Sources */,
+				40A7C5D9E2B148F6A3C7D921 /* SubGalleryAnalytics.swift in Sources */,
 				2404E3D5AABB1D9D5B7D138F /* SettingsView.swift in Sources */,
 				F13508F5478FD19C1B68B9D9 /* SubGalleryApp.swift in Sources */,
 				5A4561F8BD35C6D0DD712462 /* VideoEditorView.swift in Sources */,

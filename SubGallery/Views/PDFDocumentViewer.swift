@@ -112,6 +112,7 @@ struct PDFDocumentViewer: View {
     @State private var showsRename = false
     @State private var showsDeleteConfirmation = false
     @State private var renameText = ""
+    @State private var didLogOpen = false
 
     /// A sidebar only earns its space where there is genuinely room; in a narrow
     /// split or on iPhone the pages go into a sheet instead.
@@ -137,7 +138,13 @@ struct PDFDocumentViewer: View {
             .toolbar { toolbarContent }
             .safeAreaInset(edge: .top) { pageIndicator }
         }
-        .onAppear { model.load(url: document.pdfURL) }
+        .onAppear {
+            model.load(url: document.pdfURL)
+            if !didLogOpen, !model.failedToOpen, model.pageCount > 0 {
+                didLogOpen = true
+                SubGalleryAnalytics.pdfOpen()
+            }
+        }
         .sheet(isPresented: $showsShare) { ActivityShareSheet(urls: [document.pdfURL]) }
         .sheet(isPresented: $showsFilesExporter) { FilesExportPicker(urls: [document.pdfURL]) }
         .sheet(isPresented: $showsInfo) { DocumentInfoView(document: document) }

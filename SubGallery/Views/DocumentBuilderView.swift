@@ -320,8 +320,11 @@ struct DocumentBuilderView: View {
                         DocumentBuilderService.remove(document)
                         isBuilding = false
                         message = DocumentBuilderError.writeFailed.errorDescription
+                        SubGalleryAnalytics.pdfCreateFailed(.saveFailed)
                         return
                     }
+
+                    SubGalleryAnalytics.pdfCreateSuccess(pageCount: built.pageCount)
 
                     let wasLastFreeUse = DocumentBuilderUsageStore.isLastFreeUse(
                         isPremium: purchases.isPremium
@@ -340,8 +343,18 @@ struct DocumentBuilderView: View {
                 await MainActor.run {
                     isBuilding = false
                     message = error.localizedDescription
+                    SubGalleryAnalytics.pdfCreateFailed(pdfFailureReason(error))
                 }
             }
+        }
+    }
+
+    private func pdfFailureReason(_ error: Error) -> SubGalleryAnalytics.BuilderFailureReason {
+        guard let error = error as? DocumentBuilderError else { return .unknown }
+        switch error {
+        case .noPages: .invalidInput
+        case .renderFailed: .renderFailed
+        case .writeFailed: .saveFailed
         }
     }
 }

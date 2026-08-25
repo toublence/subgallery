@@ -1,0 +1,15 @@
+{
+  "locale": "fr-FR",
+  "language": "fr",
+  "appleLocale": "fr_FR",
+  "direction": "ltr",
+  "frames": [
+    {"frame": 1, "filename": "01-separate.png", "route": "library", "headline": "Gardez l’essentiel,\nà part de Photos", "support": "Conservez les photos et vidéos choisies séparément dans SubGallery."},
+    {"frame": 2, "filename": "02-templates.png", "route": "workflows", "headline": "À chaque photo,\nson usage", "support": "Reçus, documents, QR et voyages disposent d’outils adaptés à leur usage."},
+    {"frame": 3, "filename": "03-receipts.png", "route": "receipt-report", "headline": "Vos reçus deviennent\nun rapport de dépenses", "support": "Regroupez les montants et suivez les tendances de vos dépenses."},
+    {"frame": 4, "filename": "04-documents.png", "route": "document-pdf", "headline": "Plusieurs pages,\nun seul PDF", "support": "Numérisez vos documents et réunissez plusieurs pages dans un PDF."},
+    {"frame": 5, "filename": "05-qr.png", "route": "qr-builder", "headline": "Créez vos propres\ncodes QR", "support": "Transformez liens, Wi-Fi et contacts en QR et conservez-les dans SubGallery."},
+    {"frame": 6, "filename": "06-travel-map.png", "route": "travel-map", "headline": "Retrouvez vos voyages\nsur la carte", "support": "Revoyez les lieux et moments du voyage sur la carte et la chronologie."},
+    {"frame": 7, "filename": "07-album-automation.png", "route": "album-automation", "headline": "Vos albums,\nvos règles", "support": "Définissez la conservation et le nettoyage automatique de chaque album."}
+  ]
+}

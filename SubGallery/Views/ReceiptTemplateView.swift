@@ -67,6 +67,7 @@ struct ReceiptTemplateView: View {
     @State private var showsFilesExporter = false
     @State private var preparedExportURLs: [URL] = []
     @State private var deleteConfirmation = false
+    @State private var didLogOpen = false
 
     private var sort: ReceiptSort { ReceiptSort(rawValue: sortRaw) ?? .newest }
 
@@ -99,6 +100,15 @@ struct ReceiptTemplateView: View {
             placement: .navigationBarDrawer(displayMode: .automatic),
             prompt: L10n.text("상호, 금액, 사진 속 글자")
         )
+        .onSubmit(of: .search) {
+            guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            SubGalleryAnalytics.searchPerformed(resultCount: items.count)
+        }
+        .onAppear {
+            guard !didLogOpen else { return }
+            didLogOpen = true
+            SubGalleryAnalytics.templateOpen(.receipt)
+        }
         .navigationTitle(CapturePurpose.receipt.title)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
@@ -161,6 +171,7 @@ struct ReceiptTemplateView: View {
             guard isPremium, showsPremium else { return }
             showsPremium = false
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                SubGalleryAnalytics.receiptReportOpen()
                 showsReport = true
             }
         }
@@ -171,10 +182,24 @@ struct ReceiptTemplateView: View {
             }
         }
         .sheet(isPresented: $showsShareSheet, onDismiss: cleanupPreparedExport) {
-            ActivityShareSheet(urls: preparedExportURLs)
+            ActivityShareSheet(urls: preparedExportURLs) { completed in
+                if completed {
+                    SubGalleryAnalytics.mediaExported(
+                        destination: .share,
+                        metadataRemoved: stripsMetadata && purchases.isPremium
+                    )
+                }
+            }
         }
         .sheet(isPresented: $showsFilesExporter, onDismiss: cleanupPreparedExport) {
-            FilesExportPicker(urls: preparedExportURLs)
+            FilesExportPicker(urls: preparedExportURLs) { completed in
+                if completed {
+                    SubGalleryAnalytics.mediaExported(
+                        destination: .files,
+                        metadataRemoved: stripsMetadata && purchases.isPremium
+                    )
+                }
+            }
         }
         .confirmationDialog(
             L10n.text("선택한 사진을 최근 삭제로 이동할까요?"),
@@ -328,7 +353,12 @@ struct ReceiptTemplateView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            if isSelecting { toggle(item.id) } else { detailItem = item }
+            if isSelecting {
+                toggle(item.id)
+            } else {
+                SubGalleryAnalytics.mediaOpened()
+                detailItem = item
+            }
         }
         // `swipeActions` only does anything inside a `List`; in a grid it compiles
         // and silently does nothing, so pin and complete live in the context menu.
@@ -349,7 +379,10 @@ struct ReceiptTemplateView: View {
         Button { complete(item) } label: {
             Label(L10n.text("완료"), systemImage: "checkmark.circle")
         }
-        Button { detailItem = item } label: {
+        Button {
+            SubGalleryAnalytics.mediaOpened()
+            detailItem = item
+        } label: {
             Label(L10n.text("정보 수정"), systemImage: "pencil")
         }
     }
@@ -448,6 +481,7 @@ struct ReceiptTemplateView: View {
             isPremium: purchases.isPremium,
             hasReceiptData: !allReceipts.isEmpty
         ) {
+            SubGalleryAnalytics.receiptReportOpen()
             showsReport = true
         } else {
             PremiumAnalytics.limitReached(.receiptReport)
@@ -457,11 +491,21 @@ struct ReceiptTemplateView: View {
 
     private func importPhotos(_ selection: [PhotosPickerItem]) {
         guard !selection.isEmpty else { return }
+        SubGalleryAnalytics.mediaAddStart(
+            source: .photos, destination: .receipt,
+            template: .receipt, kind: .photo
+        )
         Task {
             defer { photosSelection = [] }
             for selectionItem in selection {
                 do {
-                    guard let data = try await selectionItem.loadTransferable(type: Data.self) else { continue }
+                    guard let data = try await selectionItem.loadTransferable(type: Data.self) else {
+                        SubGalleryAnalytics.mediaAddFailed(
+                            source: .photos, destination: .receipt,
+                            template: .receipt, kind: .photo, reason: .decodeFailed
+                        )
+                        continue
+                    }
                     let stored = try await MediaStorage.shared.store(
                         data: data,
                         type: selectionItem.supportedContentTypes.first
@@ -470,8 +514,16 @@ struct ReceiptTemplateView: View {
                         let _ = TemplateCapturePipeline.insert(
                             stored, source: .photos, purpose: .receipt, in: modelContext
                         )
+                        SubGalleryAnalytics.mediaAddSuccess(
+                            source: .photos, destination: .receipt,
+                            template: .receipt, kind: .photo
+                        )
                     }
                 } catch {
+                    SubGalleryAnalytics.mediaAddFailed(
+                        source: .photos, destination: .receipt,
+                        template: .receipt, kind: .photo, reason: .storageFailed
+                    )
                     message = error.localizedDescription
                 }
             }

@@ -44,6 +44,7 @@ enum MediaLifecycleService {
         item.isPinned = false
         item.waitingForCompletion = false
         await moveToRecentlyDeleted(item)
+        SubGalleryAnalytics.mediaCompleted()
     }
 
     static func moveToRecentlyDeleted(_ item: MediaItem) async {
@@ -54,7 +55,9 @@ enum MediaLifecycleService {
     }
 
     static func restore(_ item: MediaItem) {
+        let wasDeleted = item.deletedAt != nil
         item.deletedAt = nil
+        if wasDeleted { SubGalleryAnalytics.mediaRestored() }
         guard item.completedAt != nil else { return }
         item.isPinned = item.completionRestorePinned
         item.waitingForCompletion = item.completionRestoreWaiting

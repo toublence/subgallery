@@ -1,0 +1,15 @@
+{
+  "locale": "zh-Hans",
+  "language": "zh-Hans",
+  "appleLocale": "zh_CN",
+  "direction": "ltr",
+  "frames": [
+    {"frame": 1, "filename": "01-separate.png", "route": "library", "headline": "只把需要的照片\n单独保存", "support": "将选中的照片和视频与系统相册分开保存在 SubGallery 中。"},
+    {"frame": 2, "filename": "02-templates.png", "route": "workflows", "headline": "不同用途的照片\n用不同方式管理", "support": "收据、文档、QR 和旅行照片都有对应的专用功能。"},
+    {"frame": 3, "filename": "03-receipts.png", "route": "receipt-report", "headline": "收据变成\n支出报告", "support": "汇总付款金额，查看支出趋势和消费模式。"},
+    {"frame": 4, "filename": "04-documents.png", "route": "document-pdf", "headline": "多页文档\n合成一个 PDF", "support": "扫描文档，并将多页内容合成为一个 PDF。"},
+    {"frame": 5, "filename": "05-qr.png", "route": "qr-builder", "headline": "创建自己的\nQR 码", "support": "将链接、Wi-Fi 和联系人制作成 QR 码并保存。"},
+    {"frame": 6, "filename": "06-travel-map.png", "route": "travel-map", "headline": "在地图上\n重温旅行照片", "support": "通过地图和时间线查看照片位置与旅行轨迹。"},
+    {"frame": 7, "filename": "07-album-automation.png", "route": "album-automation", "headline": "我的相册\n按规则管理", "support": "为每个相册设置保留期限和自动整理规则。"}
+  ]
+}

@@ -40,6 +40,10 @@ enum MediaExportService {
                 request.addResource(with: type, fileURL: url, options: nil)
             }
         }
+        SubGalleryAnalytics.mediaExported(
+            destination: .photos,
+            metadataRemoved: stripsMetadata
+        )
     }
 
     static func preparedURLs(for items: [MediaItem], strippingMetadata: Bool) async throws -> [URL] {
@@ -144,10 +148,29 @@ struct ActivityShareSheet: UIViewControllerRepresentable {
 
 struct FilesExportPicker: UIViewControllerRepresentable {
     let urls: [URL]
+    var onComplete: ((Bool) -> Void)? = nil
+
+    func makeCoordinator() -> Coordinator { Coordinator(onComplete: onComplete) }
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        UIDocumentPickerViewController(forExporting: urls, asCopy: true)
+        let controller = UIDocumentPickerViewController(forExporting: urls, asCopy: true)
+        controller.delegate = context.coordinator
+        return controller
     }
 
     func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) { }
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onComplete: ((Bool) -> Void)?
+
+        init(onComplete: ((Bool) -> Void)?) { self.onComplete = onComplete }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            onComplete?(!urls.isEmpty)
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onComplete?(false)
+        }
+    }
 }

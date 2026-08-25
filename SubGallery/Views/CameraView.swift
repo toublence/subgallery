@@ -338,7 +338,12 @@ struct CameraView: View {
                     }
                 }
                 Spacer()
-                Button { camera.capture() } label: {
+                Button {
+                    if camera.mode == .photo || !camera.isRecording {
+                        logMediaAddStart(kind: camera.mode == .video ? .video : .photo)
+                    }
+                    camera.capture()
+                } label: {
                     ZStack {
                         Circle().stroke(.white, lineWidth: 4).frame(width: 76, height: 76)
                         Circle().fill(camera.mode == .video ? .red : .white)
@@ -580,7 +585,13 @@ struct CameraView: View {
         let qrPayload = camera.consumeQRPayloadAtCapture()
         Task {
             let output = croppedPhotoData(data) ?? data
-            guard let stored = try? await MediaStorage.shared.store(data: output, type: .jpeg) else { return }
+            let stored: StoredMedia
+            do {
+                stored = try await MediaStorage.shared.store(data: output, type: .jpeg)
+            } catch {
+                logMediaAddFailure(kind: .photo, reason: .storageFailed)
+                return
+            }
             if templatePurpose == .qr, qrPayload == nil {
                 do {
                     let analysis = try await OCRService.shared.analyze(at: MediaStorage.url(for: stored.relativePath))
@@ -637,7 +648,13 @@ struct CameraView: View {
     private func storeVideo(_ url: URL) {
         Task {
             defer { try? FileManager.default.removeItem(at: url) }
-            guard let stored = try? await MediaStorage.shared.store(fileAt: url, type: .quickTimeMovie) else { return }
+            let stored: StoredMedia
+            do {
+                stored = try await MediaStorage.shared.store(fileAt: url, type: .quickTimeMovie)
+            } catch {
+                logMediaAddFailure(kind: .video, reason: .storageFailed)
+                return
+            }
             insert(stored)
         }
     }
@@ -656,10 +673,22 @@ struct CameraView: View {
                 stored, source: .camera, purpose: templatePurpose,
                 in: modelContext, location: location, analysis: analysis
             )
+            if let analysis, analysis.hasQRCode {
+                let type = analysis.qrCodes.first
+                    .map(QRContentService.parse)
+                    .map { SubGalleryAnalytics.qrType($0.type) }
+                    ?? .unknown
+                SubGalleryAnalytics.qrDetected(type)
+            }
             if let realtimeQRPayload {
                 item.detectedQRCodes = OCRService.merged(item.detectedQRCodes, [realtimeQRPayload])
                 try? modelContext.save()
+                SubGalleryAnalytics.qrDetected(
+                    SubGalleryAnalytics.qrType(QRContentService.parse(realtimeQRPayload).type)
+                )
             }
+            logMediaAddSuccess(stored)
+            logTravelLocationIfNeeded(item: item, source: .camera)
             lastCapture = item
             ReviewPromptPolicy.recordSuccessfulSave()
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -697,9 +726,20 @@ struct CameraView: View {
             if preset.autoPins { item.isPinned = true }
         }
         modelContext.insert(item)
-        try? modelContext.save()
+        guard (try? modelContext.save()) != nil else {
+            logMediaAddFailure(
+                kind: stored.kind == .video ? .video : .photo,
+                reason: .saveFailed
+            )
+            return
+        }
+        logMediaAddSuccess(stored)
+        logTravelLocationIfNeeded(item: item, source: .camera)
         ReviewPromptPolicy.recordSuccessfulSave()
         if let realtimeQRPayload {
+            SubGalleryAnalytics.qrDetected(
+                SubGalleryAnalytics.qrType(QRContentService.parse(realtimeQRPayload).type)
+            )
             SmartClassificationService.applyRealtimeQRCode(
                 realtimeQRPayload,
                 to: item,
@@ -818,9 +858,65 @@ struct CameraView: View {
         item.classificationStatus = .pending
         RetentionService.apply(RetentionPolicy(rawValue: defaultRetentionRaw) ?? .forever, to: item)
         modelContext.insert(item)
-        try? modelContext.save()
+        guard (try? modelContext.save()) != nil else {
+            logMediaAddFailure(kind: .photo, reason: .saveFailed)
+            return
+        }
+        logMediaAddSuccess(stored)
         OCRService.enqueue(item, in: modelContext)
         lastCapture = item
+    }
+
+    private var analyticsDestination: SubGalleryAnalytics.Destination {
+        if let templatePurpose {
+            return SubGalleryAnalytics.Destination(rawValue: templatePurpose.rawValue) ?? .general
+        }
+        if destinationAlbum != nil { return .userAlbum }
+        return destination == .temporary ? .temporary : .general
+    }
+
+    private var analyticsTemplate: SubGalleryAnalytics.Template? {
+        templatePurpose.flatMap(SubGalleryAnalytics.Template.init)
+    }
+
+    private func logMediaAddStart(kind: SubGalleryAnalytics.AddedMediaKind) {
+        SubGalleryAnalytics.mediaAddStart(
+            source: .camera,
+            destination: analyticsDestination,
+            template: analyticsTemplate,
+            kind: kind
+        )
+    }
+
+    private func logMediaAddSuccess(_ stored: StoredMedia) {
+        SubGalleryAnalytics.mediaAddSuccess(
+            source: .camera,
+            destination: analyticsDestination,
+            template: analyticsTemplate,
+            kind: stored.kind == .video ? .video : .photo
+        )
+    }
+
+    private func logMediaAddFailure(
+        kind: SubGalleryAnalytics.AddedMediaKind,
+        reason: SubGalleryAnalytics.AddFailureReason
+    ) {
+        SubGalleryAnalytics.mediaAddFailed(
+            source: .camera,
+            destination: analyticsDestination,
+            template: analyticsTemplate,
+            kind: kind,
+            reason: reason
+        )
+    }
+
+    private func logTravelLocationIfNeeded(item: MediaItem, source: SubGalleryAnalytics.Source) {
+        guard templatePurpose == .travel else { return }
+        if item.latitude != nil, item.longitude != nil {
+            SubGalleryAnalytics.travelLocationSaved(source: source)
+        } else {
+            SubGalleryAnalytics.travelLocationFailed(.locationUnavailable)
+        }
     }
 
     private func persistCameraState(

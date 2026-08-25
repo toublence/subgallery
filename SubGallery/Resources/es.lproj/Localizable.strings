@@ -72,6 +72,7 @@
 "구매가 복원되었습니다." = "Se han restaurado tus compras.";
 "복원할 구매가 없습니다." = "No hay compras que restaurar.";
 "현재 플랜" = "Plan actual";
+"구독 관리" = "Gestionar suscripción";
 "플랜 선택" = "Elige un plan";
 "사진은 따로. 정리는 자동으로." = "Fotos separadas. Organización automática.";
 "자동 정리, iCloud 동기화, 고급 관리 기능으로 SubGallery를 더 편하게 사용하세요." = "Usa SubGallery más fácilmente con organización automática, sincronización con iCloud y gestión avanzada.";
@@ -392,3 +393,21 @@
 "글자 검색 켬" = "búsqueda de texto activada";
 "글자 검색 끔" = "búsqueda de texto desactivada";
 "이 앨범의 기존 사진 %d장에 %@ 규칙을 적용할까요?" = "¿Aplicar la regla %2$@ a %1$d fotos existentes?";
+
+/* Onboarding */
+"%d/4단계" = "Paso %d de 4";
+"필요한 사진만 따로 보관하세요" = "Guarda aparte solo las fotos que necesitas";
+"기본 사진 앱에 섞고 싶지 않은 사진과 동영상을 SubGallery에 따로 보관하세요." = "Guarda en SubGallery las fotos y los vídeos que no quieras mezclar con Fotos.";
+"사진의 목적에 맞게 관리하세요" = "Gestiona cada foto según su finalidad";
+"영수증 · 문서 · QR · 여행처럼 사진의 용도에 맞는 도구를 사용할 수 있어요." = "Usa herramientas para recibos, documentos, códigos QR y viajes.";
+"스캔 · PDF" = "Escanear · PDF";
+"읽기 · 만들기" = "Leer · Crear";
+"사진을 보관하는 데서 끝나지 않아요" = "No te limites a guardar fotos";
+"사진의 목적에 맞게 필요한 결과로 활용할 수 있어요." = "Convierte cada foto en el resultado que necesitas.";
+"QR 코드" = "Código QR";
+"지도" = "Mapa";
+"필요한 동안만 보관하고 알아서 정리하세요" = "Consérvalas el tiempo necesario y organízalas automáticamente";
+"보관 기간을 정하고 완료한 사진을 정리하세요. 내 앨범에는 관리 규칙도 설정할 수 있어요." = "Elige cuánto tiempo conservarlas y organiza las fotos completadas. También puedes definir reglas de gestión en Mis álbumes.";
+"내 앨범 규칙" = "Reglas de Mis álbumes";
+"완료 후 정리" = "Organizar al completar";
+"켬" = "Activado";
