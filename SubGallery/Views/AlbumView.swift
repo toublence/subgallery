@@ -604,8 +604,6 @@ struct AlbumView: View {
                     }
                 }
             }
-            Divider()
-            Button { setSelecting(true) } label: { Label(L10n.text("선택"), systemImage: "checkmark.circle") }
         } label: {
             Label(L10n.text("보기 옵션"), systemImage: "ellipsis.circle")
         }
