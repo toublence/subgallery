@@ -120,6 +120,7 @@ struct AlbumView: View {
     @State private var showsDocumentPaywall = false
     @State private var showsQRBuilder = false
     @State private var showsQRPaywall = false
+    @State private var automationAlbum: Album?
     @State private var documentToOpen: Document?
     @State private var documentPendingDeletion: Document?
     @State private var showsTravelMap = false
@@ -315,6 +316,14 @@ struct AlbumView: View {
                         }
                         .accessibilityLabel(L10n.text("QR 만들기"))
                     }
+                    // User albums only. Templates already have their own headline
+                    // feature, and smart albums are views rather than containers.
+                    if let album = userAlbum {
+                        Button { automationAlbum = album } label: {
+                            Image(systemName: "slider.horizontal.3")
+                        }
+                        .accessibilityLabel(L10n.text("앨범 자동화"))
+                    }
                     if case .template(.travel) = destination {
                         Button {
                             openTravelMap()
@@ -412,6 +421,9 @@ struct AlbumView: View {
             PremiumView(entryPoint: .documentBuilder).presentationDetents([.large])
         }
         .sheet(isPresented: $showsQRBuilder) { QRCodeBuilderView() }
+        .sheet(item: $automationAlbum) { album in
+            AlbumAutomationView(album: album)
+        }
         .sheet(isPresented: $showsQRPaywall) {
             PremiumView(entryPoint: .qrBuilder).presentationDetents([.large])
         }

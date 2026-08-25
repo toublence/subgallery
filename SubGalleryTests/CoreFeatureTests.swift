@@ -709,6 +709,207 @@ final class CoreFeatureTests: XCTestCase {
         XCTAssertEqual(OCRService.qrPayload(symbology: .qr, payload: " hello "), "hello")
     }
 
+    // MARK: - Album automation
+
+    private func makeUserAlbum(
+        _ context: ModelContext,
+        retention: RetentionPolicy = .forever,
+        ocr: Bool = true,
+        savesLocation: Bool = false,
+        autoPins: Bool = false,
+        autoCleanup: Bool = false
+    ) -> Album {
+        let album = Album(name: "내 앨범", defaultRetention: retention)
+        album.purpose = .custom
+        album.ocrEnabled = ocr
+        album.savesLocation = savesLocation
+        album.autoPins = autoPins
+        album.autoCleanupEnabled = autoCleanup
+        context.insert(album)
+        return album
+    }
+
+    private func newItem(_ context: ModelContext, createdAt: Date = .now) -> MediaItem {
+        let item = MediaItem(
+            kind: .photo, source: .camera,
+            localPath: "Media/\(UUID().uuidString).jpg",
+            createdAt: createdAt
+        )
+        context.insert(item)
+        return item
+    }
+
+    func testAutomationCase3RetentionAppliesToNewItems() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let album = makeUserAlbum(context, retention: .sevenDays)
+        let item = newItem(context)
+
+        AlbumAutomationService.apply(album, to: item)
+
+        XCTAssertEqual(item.albumID, album.id)
+        XCTAssertEqual(item.expirationType, .sevenDays)
+        XCTAssertNotNil(item.expirationDate)
+    }
+
+    func testAutomationCase4And6OCRAndAutoPinFollowTheAlbum() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let onAlbum = makeUserAlbum(context, ocr: true, autoPins: true)
+        let offAlbum = makeUserAlbum(context, ocr: false, autoPins: false)
+
+        let pinned = newItem(context)
+        AlbumAutomationService.apply(onAlbum, to: pinned)
+        XCTAssertTrue(pinned.analysisEnabled)
+        XCTAssertTrue(pinned.isPinned)
+
+        let plain = newItem(context)
+        AlbumAutomationService.apply(offAlbum, to: plain)
+        XCTAssertFalse(plain.analysisEnabled)
+        XCTAssertFalse(plain.isPinned)
+    }
+
+    func testAutomationCase7ChangingRulesLeavesExistingPhotosAlone() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let album = makeUserAlbum(context, retention: .forever)
+        let existing = newItem(context)
+        AlbumAutomationService.apply(album, to: existing)
+        XCTAssertNil(existing.expirationDate)
+
+        // Changing the album's rule must not touch photos already inside.
+        album.defaultRetention = .sevenDays
+        try context.save()
+
+        XCTAssertNil(existing.expirationDate, "a settings change must not rewrite existing photos")
+        XCTAssertEqual(existing.expirationType, .forever)
+    }
+
+    func testAutomationCase8RetroactiveApplySkipsPinnedPhotos() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let album = makeUserAlbum(context, retention: .thirtyDays)
+        var items: [MediaItem] = []
+        for index in 0..<5 {
+            let item = newItem(context)
+            item.albumID = album.id
+            if index == 0 { item.isPinned = true }
+            items.append(item)
+        }
+        let outsider = newItem(context)
+        items.append(outsider)
+
+        let targets = AlbumAutomationService.itemsEligibleForRetroactiveRetention(in: album, from: items)
+        XCTAssertEqual(targets.count, 4, "pinned photo and the outsider are excluded")
+
+        let changed = AlbumAutomationService.applyRetentionToExisting(
+            in: album, media: items, context: context
+        )
+        XCTAssertEqual(changed, 4)
+        XCTAssertNil(items[0].expirationDate, "a pinned photo keeps its own terms")
+        XCTAssertEqual(items[1].expirationType, .thirtyDays)
+        XCTAssertEqual(outsider.expirationType, .forever, "photos in other albums are untouched")
+    }
+
+    func testAutomationCase9AutomaticCleanupIsOptInPerAlbum() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let manual = makeUserAlbum(context, autoCleanup: false)
+        let automatic = makeUserAlbum(context, autoCleanup: true)
+        let albums = [manual, automatic]
+
+        let manualItem = newItem(context)
+        manualItem.albumID = manual.id
+        let autoItem = newItem(context)
+        autoItem.albumID = automatic.id
+        let looseItem = newItem(context)
+
+        XCTAssertFalse(AlbumAutomationService.allowsAutomaticCleanup(manualItem, albums: albums))
+        XCTAssertTrue(AlbumAutomationService.allowsAutomaticCleanup(autoItem, albums: albums))
+        XCTAssertTrue(
+            AlbumAutomationService.allowsAutomaticCleanup(looseItem, albums: albums),
+            "photos outside a user album keep the existing behaviour"
+        )
+    }
+
+    func testAutomationCase9CleanupNeverPermanentlyDeletesOrTouchesPins() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let expired = newItem(context)
+        RetentionService.apply(.today, to: expired)
+        expired.expirationDate = Date(timeIntervalSinceNow: -3600)
+
+        XCTAssertTrue(RetentionService.shouldMoveToRecentlyDeleted(expired))
+        await MediaLifecycleService.moveToRecentlyDeleted(expired)
+        XCTAssertNotNil(expired.deletedAt, "goes to Recently Deleted, not permanent deletion")
+
+        let pinned = newItem(context)
+        RetentionService.apply(.today, to: pinned)
+        pinned.expirationDate = Date(timeIntervalSinceNow: -3600)
+        pinned.isPinned = true
+        XCTAssertFalse(
+            RetentionService.shouldMoveToRecentlyDeleted(pinned),
+            "a pinned photo is never swept, whatever the album says"
+        )
+    }
+
+    func testAutomationCase10SuggestionsComeFromStoredFieldsOnly() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let album = makeUserAlbum(context)
+        let now = Date()
+
+        let old = newItem(context, createdAt: Date(timeIntervalSinceNow: -40 * 86_400))
+        old.albumID = album.id
+
+        let waiting = newItem(context)
+        waiting.albumID = album.id
+        waiting.waitingForCompletion = true
+
+        let soon = newItem(context)
+        soon.albumID = album.id
+        soon.expirationDate = Date(timeIntervalSinceNow: 2 * 86_400)
+
+        let pinnedOld = newItem(context, createdAt: Date(timeIntervalSinceNow: -60 * 86_400))
+        pinnedOld.albumID = album.id
+        pinnedOld.isPinned = true
+
+        let media = [old, waiting, soon, pinnedOld]
+        let suggestions = AlbumAutomationService.cleanupSuggestions(for: album, media: media, now: now)
+
+        XCTAssertEqual(suggestions.agedOut.map(\.id), [old.id])
+        XCTAssertEqual(suggestions.waitingForCompletion.map(\.id), [waiting.id])
+        XCTAssertEqual(suggestions.expiringSoon.map(\.id), [soon.id])
+        XCTAssertEqual(suggestions.total, 3, "pinned photos are never suggested")
+    }
+
+    func testAutomationSummaryDescribesTheCurrentRules() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let album = makeUserAlbum(context, retention: .thirtyDays, ocr: true, autoCleanup: false)
+
+        let summary = AlbumAutomationService.summary(for: album)
+        XCTAssertTrue(summary.contains(RetentionPolicy.thirtyDays.title))
+        XCTAssertTrue(summary.contains(L10n.text("직접 완료")))
+    }
+
+    func testAutomationCase2TemplatesKeepTheirOwnBehaviour() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let receipt = Album(name: "Receipt", defaultRetention: .thirtyDays)
+        receipt.purpose = .receipt
+        receipt.isBuiltIn = true
+        receipt.autoCleanupEnabled = false
+        context.insert(receipt)
+
+        let item = newItem(context)
+        item.albumID = receipt.id
+
+        // A template album never opts out of the sweep, so receipt retention keeps
+        // working exactly as before this feature existed.
+        XCTAssertTrue(AlbumAutomationService.allowsAutomaticCleanup(item, albums: [receipt]))
+    }
+
     // MARK: - PDF viewer
 
     /// Writes a real PDF into the same location the builder uses, so the viewer is

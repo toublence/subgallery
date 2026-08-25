@@ -387,6 +387,10 @@ final class Album {
     var isBuiltIn: Bool = false
     var smartRuleEnabled: Bool = false
     var smartRuleKeywords: String = ""
+    /// Whether expired photos in this album are swept to Recently Deleted on their
+    /// own. Off means the user finishes them by hand, which is the default for a new
+    /// album — automatic tidying is the Premium behaviour.
+    var autoCleanupEnabled: Bool = false
 
     init(name: String, sortOrder: Int = 0, defaultRetention: RetentionPolicy = .forever) {
         self.id = UUID()

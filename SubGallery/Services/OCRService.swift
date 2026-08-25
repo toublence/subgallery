@@ -597,11 +597,8 @@ enum SmartClassificationService {
         retention: RetentionPolicy,
         in context: ModelContext
     ) {
-        item.albumID = album?.id
-        item.purpose = album?.purpose ?? item.suggestedPurpose ?? .general
-        item.analysisEnabled = album?.ocrEnabled ?? true
-        item.primaryAction = album?.primaryAction ?? .automatic
-        RetentionService.apply(retention, customDate: album?.defaultRetentionDate, to: item)
+        AlbumAutomationService.apply(album, to: item, overridingRetention: retention)
+        if album == nil, let suggested = item.suggestedPurpose { item.purpose = suggested }
         item.classificationStatus = .applied
         try? context.save()
     }

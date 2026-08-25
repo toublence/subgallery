@@ -336,7 +336,7 @@ struct LibraryView: View {
                 .presentationDetents([.large])
         }
         .sheet(item: $rulesAlbum) { album in
-            AlbumRulesView(album: album)
+            AlbumAutomationView(album: album)
                 .presentationDetents([.large])
         }
         .sheet(item: $classificationItem) { item in
@@ -424,11 +424,10 @@ struct LibraryView: View {
             Button { coverAlbum = album } label: { Label(L10n.text("대표 사진 변경"), systemImage: "photo") }
                 .disabled(albumMedia.isEmpty)
             Button { retentionAlbum = album } label: { Label(L10n.text("기본 보관 기간"), systemImage: "clock") }
-            Button {
-                if purchases.isPremium { rulesAlbum = album }
-                else { showsPremium = true }
-            } label: {
-                Label(L10n.text("앨범 규칙"), systemImage: purchases.isPremium ? "slider.horizontal.3" : "lock.fill")
+            // No longer gated: the basic album rules are part of the free experience,
+            // and only the advanced rows inside lead to the paywall.
+            Button { rulesAlbum = album } label: {
+                Label(L10n.text("앨범 자동화"), systemImage: "slider.horizontal.3")
             }
             Divider()
             Button(role: .destructive) { albumPendingDeletion = album } label: {
@@ -669,16 +668,16 @@ struct LibraryView: View {
         )
         item.latitude = stored.latitude
         item.longitude = stored.longitude
-        item.albumID = targetAlbum?.id
-        item.purpose = targetAlbum?.purpose ?? .general
-        item.analysisEnabled = targetAlbum?.ocrEnabled ?? true
-        item.primaryAction = targetAlbum?.primaryAction ?? .automatic
-        item.isPinned = targetAlbum?.autoPins ?? false
-        let policy = targetAlbum?.defaultRetention
-            ?? (usesTemporaryDefault ? .sevenDays : RetentionPolicy(rawValue: defaultRetentionRaw) ?? .forever)
-        let customDate = targetAlbum?.defaultRetentionDate
-            ?? (defaultRetentionDate > 0 ? Date(timeIntervalSince1970: defaultRetentionDate) : nil)
-        RetentionService.apply(policy, customDate: customDate, to: item)
+        AlbumAutomationService.apply(
+            targetAlbum,
+            to: item,
+            fallbackRetention: usesTemporaryDefault
+                ? .sevenDays
+                : RetentionPolicy(rawValue: defaultRetentionRaw) ?? .forever,
+            fallbackRetentionDate: defaultRetentionDate > 0
+                ? Date(timeIntervalSince1970: defaultRetentionDate)
+                : nil
+        )
         modelContext.insert(item)
         try? modelContext.save()
         ReviewPromptPolicy.recordSuccessfulSave()
@@ -1169,119 +1168,6 @@ struct SmartClassificationSuggestionView: View {
             SmartClassificationService.dismiss(item, in: modelContext)
         }
         dismiss()
-    }
-}
-
-struct AlbumRulesView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
-    let album: Album
-    @StateObject private var purchases = PurchaseManager.shared
-    @State private var showsPremium = false
-    @State private var customDate: Date
-
-    init(album: Album) {
-        self.album = album
-        _customDate = State(initialValue: album.defaultRetentionDate
-            ?? Calendar.current.date(byAdding: .day, value: 1, to: .now)
-            ?? .now)
-    }
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                if purchases.isPremium { rulesForm }
-                else {
-                    ContentUnavailableView {
-                        Label(L10n.text("스마트 규칙은 Premium 기능입니다"), systemImage: "lock.fill")
-                    } description: {
-                        Text(L10n.text("사진을 분석해 앨범과 보관 기간을 추천합니다."))
-                    } actions: {
-                        Button(L10n.text("Premium 보기")) { showsPremium = true }
-                            .buttonStyle(.borderedProminent)
-                    }
-                }
-            }
-            .navigationTitle(L10n.text("앨범 규칙"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(L10n.text("완료")) { try? modelContext.save(); dismiss() }
-                }
-            }
-        }
-        .task { await purchases.prepare() }
-        .sheet(isPresented: $showsPremium) {
-            PremiumView().presentationDetents([.large])
-        }
-    }
-
-    private var rulesForm: some View {
-        Form {
-                Section {
-                    Toggle(L10n.text("스마트 자동 분류"), isOn: Binding(
-                        get: { album.smartRuleEnabled },
-                        set: {
-                            album.smartRuleEnabled = $0
-                            if $0 { album.ocrEnabled = true }
-                        }
-                    ))
-                    TextField(L10n.text("키워드"), text: Binding(
-                        get: { album.smartRuleKeywords },
-                        set: { album.smartRuleKeywords = $0 }
-                    ), axis: .vertical)
-                    Text(L10n.text("쉼표로 구분한 키워드가 사진 속 텍스트에 있으면 이 앨범을 추천합니다."))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } header: {
-                    Text(L10n.text("자동 분류 규칙"))
-                }
-
-                Section(L10n.text("목적")) {
-                    Picker(L10n.text("앨범 목적"), selection: Binding(
-                        get: { album.purpose },
-                        set: { album.purpose = $0 }
-                    )) {
-                        ForEach(CapturePurpose.allCases.filter {
-                            $0 != .general && ($0 != .travel || album.purpose == .travel)
-                        }) { purpose in
-                            Text(purpose.title).tag(purpose)
-                        }
-                    }
-                    Picker(L10n.text("대표 Action"), selection: Binding(
-                        get: { album.primaryAction },
-                        set: { album.primaryAction = $0 }
-                    )) {
-                        ForEach(PrimaryMediaAction.allCases) { action in
-                            Text(action.title).tag(action)
-                        }
-                    }
-                }
-
-                Section(L10n.text("촬영 및 분석")) {
-                    Toggle(L10n.text("텍스트·QR 분석"), isOn: Binding(get: { album.ocrEnabled }, set: { album.ocrEnabled = $0 }))
-                    Toggle(L10n.text("촬영 위치 저장"), isOn: Binding(get: { album.savesLocation }, set: { album.savesLocation = $0 }))
-                    Toggle(L10n.text("촬영 후 자동 고정"), isOn: Binding(get: { album.autoPins }, set: { album.autoPins = $0 }))
-                }
-
-                Section(L10n.text("기본 보관")) {
-                    Picker(L10n.text("보관 기간"), selection: Binding(
-                        get: { album.defaultRetention },
-                        set: { policy in
-                            album.defaultRetention = policy
-                            album.defaultRetentionDate = policy == .customDate ? customDate : nil
-                        }
-                    )) {
-                        ForEach(RetentionPolicy.allCases) { policy in
-                            Text(policy.title).tag(policy)
-                        }
-                    }
-                    if album.defaultRetention == .customDate {
-                        DatePicker(L10n.text("날짜"), selection: $customDate, in: Date.now..., displayedComponents: [.date, .hourAndMinute])
-                            .onChange(of: customDate) { _, date in album.defaultRetentionDate = date }
-                    }
-                }
-            }
     }
 }
 

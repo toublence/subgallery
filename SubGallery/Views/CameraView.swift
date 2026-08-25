@@ -679,14 +679,23 @@ struct CameraView: View {
             item.latitude = stored.latitude
             item.longitude = stored.longitude
         }
-        item.albumID = destinationAlbum?.id
-        item.purpose = activePreset?.purpose ?? destinationAlbum?.purpose ?? .general
-        item.analysisEnabled = activePreset?.ocrEnabled ?? destinationAlbum?.ocrEnabled ?? true
-        item.primaryAction = activePreset?.primaryAction ?? destinationAlbum?.primaryAction ?? .automatic
-        item.isPinned = activePreset?.autoPins ?? destinationAlbum?.autoPins ?? false
-        let customDate = destinationAlbum?.defaultRetentionDate
-            ?? (defaultRetentionDate > 0 ? Date(timeIntervalSince1970: defaultRetentionDate) : nil)
-        RetentionService.apply(retention, customDate: customDate, to: item)
+        AlbumAutomationService.apply(
+            destinationAlbum,
+            to: item,
+            // The retention picked in the camera is an explicit choice for this shot.
+            overridingRetention: retention,
+            fallbackRetentionDate: defaultRetentionDate > 0
+                ? Date(timeIntervalSince1970: defaultRetentionDate)
+                : nil
+        )
+        // A capture preset is chosen per shot, so it takes precedence over the
+        // album's standing rules.
+        if let preset = activePreset {
+            item.purpose = preset.purpose
+            item.analysisEnabled = preset.ocrEnabled
+            item.primaryAction = preset.primaryAction
+            if preset.autoPins { item.isPinned = true }
+        }
         modelContext.insert(item)
         try? modelContext.save()
         ReviewPromptPolicy.recordSuccessfulSave()

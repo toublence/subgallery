@@ -55,19 +55,16 @@ enum SharedInboxService {
                     height: stored.height,
                     duration: stored.duration
                 )
-                item.albumID = album?.id
                 item.latitude = stored.latitude
                 item.longitude = stored.longitude
-                item.purpose = album?.purpose ?? .general
-                item.analysisEnabled = album?.ocrEnabled ?? true
-                item.primaryAction = album?.primaryAction ?? .automatic
-                item.isPinned = album?.autoPins ?? false
-
-                let selectedPolicy = RetentionPolicy(rawValue: manifest.retentionRaw)
-                let policy = selectedPolicy
-                    ?? album?.defaultRetention
-                    ?? (target == .temporary ? .sevenDays : defaultRetention)
-                RetentionService.apply(policy, customDate: album?.defaultRetentionDate, to: item)
+                AlbumAutomationService.apply(
+                    album,
+                    to: item,
+                    // The share sheet's own choice, when the user made one, outranks
+                    // the album default.
+                    overridingRetention: RetentionPolicy(rawValue: manifest.retentionRaw),
+                    fallbackRetention: target == .temporary ? .sevenDays : defaultRetention
+                )
                 context.insert(item)
                 try context.save()
                 OCRService.enqueue(item, in: context)

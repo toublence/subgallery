@@ -614,7 +614,11 @@ struct SubGalleryApp: App {
         let context = dataStore.container.mainContext
         let now = Date.now
         let items = (try? context.fetch(FetchDescriptor<MediaItem>())) ?? []
+        let albums = (try? context.fetch(FetchDescriptor<Album>())) ?? []
         for item in items where item.deletedAt == nil && (item.expirationDate.map { $0 <= now } ?? false) {
+            // An album set to finish manually keeps its expired photos in place; the
+            // user completes them. Templates and loose photos sweep as before.
+            guard AlbumAutomationService.allowsAutomaticCleanup(item, albums: albums) else { continue }
             if item.isPinned {
                 if let identifier = await ReminderService.shared.schedulePinnedExpirationSafetyIfAuthorized(for: item) {
                     item.reminderIdentifier = identifier
