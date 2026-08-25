@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0A5B3C7D9E1F2468ACE13579 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 1B6C4D8E0F2A3579BDF24680 /* PrivacyInfo.xcprivacy */; };
 		00DED6DE466B339AAA463A1E /* ReminderFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B68C1E5FC9C4C887734FB62 /* ReminderFlowUITests.swift */; };
 		02377C53FFD2849168D48B39 /* PDFDocumentViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E45F46ED039685FADC2E7CE0 /* PDFDocumentViewer.swift */; };
 		115467E25549FBC81FA5FF07 /* ReceiptAmountExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AE923873437240BB258C530 /* ReceiptAmountExtractor.swift */; };
@@ -34,7 +35,6 @@
 		8BC1673AFD4798B4E1B2B46A /* PhotoEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA6E398F9224AC2E5412A192 /* PhotoEditorView.swift */; };
 		8BD7ACB045259CAA84FC2045 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 1D489CE3A383A1E1AEF7AB86 /* InfoPlist.strings */; };
 		91EC3F20C752640D9487B1C7 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = D78092775023047B18994069 /* Models.swift */; };
-		93033C3BE11F46A4614C8B6B /* SharedInboxService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD4F8B8C9DE9B6552B21FB91 /* SharedInboxService.swift */; };
 		989849DC7A6FFE62BA75BBDD /* AlbumAutomationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0B15C4FE7367BFB812DF2B6 /* AlbumAutomationService.swift */; };
 		9CCCA43401620821F968B8D2 /* QRCodeBuilderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EED013ED024055C56A597D3 /* QRCodeBuilderService.swift */; };
 		A8A2304657CC716B52FBB9F0 /* CapturePresetService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66BD0527AA3E7F84829F89D2 /* CapturePresetService.swift */; };
@@ -69,6 +69,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		1B6C4D8E0F2A3579BDF24680 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		0419DE9C25D08523D83F6095 /* ReceiptTemplateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiptTemplateView.swift; sourceTree = "<group>"; };
 		0580F6773753EDD670BE2E3E /* fr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = fr; path = fr.lproj/Localizable.strings; sourceTree = "<group>"; };
 		0AF37C9DD02377C74B01812D /* MediaMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaMapView.swift; sourceTree = "<group>"; };
@@ -129,7 +130,6 @@
 		F4EC6A0C3C613175E96A00D5 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		F590B64DEBEFABE737D7AE03 /* es */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = es; path = es.lproj/Localizable.strings; sourceTree = "<group>"; };
 		F78A5D96F91B1819D52A5089 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		FD4F8B8C9DE9B6552B21FB91 /* SharedInboxService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedInboxService.swift; sourceTree = "<group>"; };
 		FE1E36D0704614F190E5EB6A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -191,6 +191,7 @@
 			children = (
 				A61D1381EDDC141B87A96112 /* Assets.xcassets */,
 				FE1E36D0704614F190E5EB6A /* Info.plist */,
+				1B6C4D8E0F2A3579BDF24680 /* PrivacyInfo.xcprivacy */,
 				0F39795236E7F4026FACB9E5 /* SubGallery.entitlements */,
 				1D489CE3A383A1E1AEF7AB86 /* InfoPlist.strings */,
 				49E38ECC1E07A9C04B5B0135 /* Localizable.strings */,
@@ -256,7 +257,6 @@
 				93EF563772AD6AD8F4B5C690 /* ReceiptSummaryService.swift */,
 				A5E6A5E7050A65C1316E1469 /* ReminderService.swift */,
 				E2C11E7C2B32572F1741D84C /* RetentionService.swift */,
-				FD4F8B8C9DE9B6552B21FB91 /* SharedInboxService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -393,6 +393,7 @@
 				BECEFDDDE0F8C1FD7D24168D /* GoogleService-Info.plist in Resources */,
 				8BD7ACB045259CAA84FC2045 /* InfoPlist.strings in Resources */,
 				B6BA5195C2837511D8E245D0 /* Localizable.strings in Resources */,
+				0A5B3C7D9E1F2468ACE13579 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -443,7 +444,6 @@
 				404B0EC6029434DB874EC510 /* ReminderService.swift in Sources */,
 				39ECD60577F267B40BE40536 /* RetentionService.swift in Sources */,
 				2404E3D5AABB1D9D5B7D138F /* SettingsView.swift in Sources */,
-				93033C3BE11F46A4614C8B6B /* SharedInboxService.swift in Sources */,
 				F13508F5478FD19C1B68B9D9 /* SubGalleryApp.swift in Sources */,
 				5A4561F8BD35C6D0DD712462 /* VideoEditorView.swift in Sources */,
 			);

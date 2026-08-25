@@ -1,9 +1,0 @@
-{
-  "01-separate": ["A separate place\nfor your photos", "Keep the photos and videos you need together in SubGallery."],
-  "02-camera": ["Capture straight into\nthe right album", "Choose a purpose and destination right from the camera."],
-  "03-retention": ["Keep photos only\nas long as needed", "Today, 7 days, 30 days, or until done.\nSubGallery tidies them up automatically."],
-  "04-albums": ["Organize by purpose,\nkeep everything clear", "Keep receipts, parking, documents, and trips apart."],
-  "05-search": ["Search text\ninside your photos", "Find receipts, documents, and parking spots\nwith just one word you remember."],
-  "06-batch": ["Handle many photos\nall at once", "Select all, move, export, or delete in a few taps."],
-  "07-private": ["For your eyes only", "Protect SubGallery with a PIN.\nPhotos stay hidden in the app switcher."]
-}

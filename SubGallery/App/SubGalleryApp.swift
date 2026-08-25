@@ -401,10 +401,6 @@ struct SubGalleryApp: App {
                     if PurchaseManager.shared.isPremium {
                         await PremiumBackfillService.run(in: dataStore.container.mainContext)
                     }
-                    SharedInboxService.publishConfiguration(
-                        albums: (try? dataStore.container.mainContext.fetch(FetchDescriptor<Album>())) ?? []
-                    )
-                    await SharedInboxService.ingestPendingItems(in: dataStore.container.mainContext)
                     await performExpirationSweep()
                     resumePendingOCR()
                 }
@@ -435,7 +431,6 @@ struct SubGalleryApp: App {
                             if PurchaseManager.shared.isPremium && dataStore.usesCloudKit {
                                 await reconcileCloudMediaAssets()
                             }
-                            await SharedInboxService.ingestPendingItems(in: dataStore.container.mainContext)
                             await performExpirationSweep()
                         }
                     }

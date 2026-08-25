@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 /// What a user album does to the photos that land in it. Every entry path — camera,
-/// import, share extension, smart classification — routes through here so the rules
+/// import and smart classification route through here so the rules
 /// cannot drift between them.
 @MainActor
 enum AlbumAutomationService {

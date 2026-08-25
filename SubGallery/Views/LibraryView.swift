@@ -54,7 +54,6 @@ struct LibraryView: View {
     @AppStorage("camera.destinationAlbumID") private var cameraDestinationAlbumID = ""
     @AppStorage("defaults.cameraDestination") private var defaultCameraDestination = StorageDestination.camera.token
     @AppStorage("defaults.importDestination") private var defaultImportDestination = StorageDestination.all.token
-    @AppStorage("defaults.shareDestination") private var defaultShareDestination = StorageDestination.temporary.token
     @AppStorage("camera.purposePresetID") private var cameraPurposePresetID = "general"
     @AppStorage("app.startScreen") private var appStartScreenRaw = AppStartScreen.library.rawValue
     @AppStorage("app.lastScreen") private var lastScreenRaw = AppStartScreen.library.rawValue
@@ -234,7 +233,6 @@ struct LibraryView: View {
                 lastLibraryDestination = path.last?.persistenceToken ?? ""
             }
             .onChange(of: albums.map { "\($0.id.uuidString):\($0.name)" }) { _, _ in
-                SharedInboxService.publishConfiguration(albums: albums)
                 restoreLastDestinationIfNeeded()
             }
             .onAppear {
@@ -620,7 +618,6 @@ struct LibraryView: View {
         }
         if defaultCameraDestination == albumToken { defaultCameraDestination = StorageDestination.camera.token }
         if defaultImportDestination == albumToken { defaultImportDestination = StorageDestination.all.token }
-        if defaultShareDestination == albumToken { defaultShareDestination = StorageDestination.temporary.token }
         modelContext.delete(album)
         try? modelContext.save()
         albumPendingDeletion = nil

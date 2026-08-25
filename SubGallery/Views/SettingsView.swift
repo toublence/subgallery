@@ -38,7 +38,6 @@ struct SettingsView: View {
     @AppStorage("app.startScreen") private var appStartScreen = AppStartScreen.library.rawValue
     @AppStorage("defaults.cameraDestination") private var defaultCameraDestination = StorageDestination.camera.token
     @AppStorage("defaults.importDestination") private var defaultImportDestination = StorageDestination.all.token
-    @AppStorage("defaults.shareDestination") private var defaultShareDestination = StorageDestination.temporary.token
     @AppStorage("camera.destinationAlbumID") private var currentCameraDestination = StorageDestination.camera.token
     @StateObject private var purchases = PurchaseManager.shared
     @StateObject private var locationPermission = LocationPermissionController()
@@ -78,10 +77,6 @@ struct SettingsView: View {
                     }
                     Picker(L10n.text("가져오기"), selection: $defaultImportDestination) {
                         Text(L10n.text("전체")).tag(StorageDestination.all.token)
-                        Text(L10n.text("임시 보관")).tag(StorageDestination.temporary.token)
-                        destinationAlbumOptions
-                    }
-                    Picker(L10n.text("공유로 가져오기"), selection: $defaultShareDestination) {
                         Text(L10n.text("임시 보관")).tag(StorageDestination.temporary.token)
                         destinationAlbumOptions
                     }
@@ -287,9 +282,6 @@ struct SettingsView: View {
         }
         if case .album(let id) = StorageDestination(token: defaultImportDestination), !validIDs.contains(id) {
             defaultImportDestination = StorageDestination.all.token
-        }
-        if case .album(let id) = StorageDestination(token: defaultShareDestination), !validIDs.contains(id) {
-            defaultShareDestination = StorageDestination.temporary.token
         }
     }
 

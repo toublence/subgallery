@@ -1,9 +1,0 @@
-{
-  "01-separate": ["Tus fotos, separadas\ny bien guardadas", "Reúne las fotos y los vídeos que necesitas en SubGallery."],
-  "02-camera": ["Captura directo\nen el álbum correcto", "Elige el propósito y el destino desde la cámara."],
-  "03-retention": ["Guárdalas solo\nmientras las necesites", "Hoy, 7 días, 30 días o hasta terminar.\nDespués, SubGallery las organiza automáticamente."],
-  "04-albums": ["Álbumes por propósito,\ntodo en orden", "Separa recibos, aparcamiento, documentos y viajes."],
-  "05-search": ["Busca texto\ndentro de tus fotos", "Encuentra recibos, documentos y aparcamientos\ncon una sola palabra."],
-  "06-batch": ["Organiza muchas fotos\nde una sola vez", "Selecciona todo, mueve, exporta o elimina rápidamente."],
-  "07-private": ["Solo tú\npuedes entrar", "Protege SubGallery con un PIN.\nLas fotos también se ocultan en el selector de apps."]
-}
