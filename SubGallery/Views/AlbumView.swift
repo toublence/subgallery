@@ -93,6 +93,7 @@ struct AlbumView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \MediaItem.createdAt, order: .reverse) private var allMedia: [MediaItem]
     @Query(sort: \Album.sortOrder) private var albums: [Album]
+    @Query(sort: \Document.createdAt, order: .reverse) private var documents: [Document]
     @StateObject private var purchases = PurchaseManager.shared
     let destination: AlbumDestination
     @Binding var isCameraPresented: Bool
@@ -115,6 +116,10 @@ struct AlbumView: View {
     @State private var photosSelection: [PhotosPickerItem] = []
     @State private var importError: String?
     @State private var showsDocumentScanner = false
+    @State private var showsDocumentBuilder = false
+    @State private var showsDocumentPaywall = false
+    @State private var documentToOpen: Document?
+    @State private var documentPendingDeletion: Document?
     @State private var showsTravelMap = false
     @State private var showsPremium = false
     @State private var bulkMessage: String?
@@ -144,20 +149,25 @@ struct AlbumView: View {
     }
 
     private var columns: [GridItem] {
+        // Documents are read, not scanned past: they get the same roomy two/three
+        // column layout the other templates use rather than the dense photo grid,
+        // where a page shrinks to an unreadable tile.
+        if case .template(.document) = destination { return TemplateGridLayout.columns }
         switch gridMode {
-        case .small: [GridItem(.adaptive(minimum: 68, maximum: 104), spacing: 2)]
-        case .standard: [GridItem(.adaptive(minimum: 94, maximum: 180), spacing: 4)]
-        case .large: [GridItem(.adaptive(minimum: 160, maximum: 360), spacing: 8)]
-        case .original: [GridItem(.adaptive(minimum: 150, maximum: 320), spacing: 6)]
+        case .small: return [GridItem(.adaptive(minimum: 68, maximum: 104), spacing: 2)]
+        case .standard: return [GridItem(.adaptive(minimum: 94, maximum: 180), spacing: 4)]
+        case .large: return [GridItem(.adaptive(minimum: 160, maximum: 360), spacing: 8)]
+        case .original: return [GridItem(.adaptive(minimum: 150, maximum: 320), spacing: 6)]
         }
     }
 
     private var gridSpacing: CGFloat {
+        if case .template(.document) = destination { return 12 }
         switch gridMode {
-        case .small: 2
-        case .standard: 4
-        case .large: 8
-        case .original: 6
+        case .small: return 2
+        case .standard: return 4
+        case .large: return 8
+        case .original: return 6
         }
     }
 
@@ -194,6 +204,11 @@ struct AlbumView: View {
         return filtered.sorted(by: isOrderedBefore)
     }
 
+    private var isDocumentTemplate: Bool {
+        if case .template(.document) = destination { return true }
+        return false
+    }
+
     private var isRecentlyDeleted: Bool {
         if case .smart(.recentlyDeleted) = destination { return true }
         return false
@@ -227,6 +242,9 @@ struct AlbumView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 20)
             } else {
+                if case .template(.document) = destination, !documents.isEmpty {
+                    documentSection
+                }
                 LazyVGrid(columns: columns, spacing: gridSpacing) {
                     if case .smart(.temporary) = destination {
                         ForEach(temporaryGroups) { group in
@@ -283,6 +301,12 @@ struct AlbumView: View {
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if !isSelecting {
+                    if case .template(.document) = destination {
+                        Button { openDocumentBuilder() } label: {
+                            Image(systemName: "doc.badge.plus")
+                        }
+                        .accessibilityLabel(L10n.text("문서 만들기"))
+                    }
                     if case .template(.travel) = destination {
                         Button {
                             openTravelMap()
@@ -373,6 +397,29 @@ struct AlbumView: View {
             FilesExportPicker(urls: preparedExportURLs)
         }
         .onChange(of: photosSelection) { _, selection in importPhotos(selection) }
+        .sheet(isPresented: $showsDocumentBuilder) {
+            DocumentBuilderView(sourceItems: baseItems)
+        }
+        .sheet(isPresented: $showsDocumentPaywall) {
+            PremiumView(entryPoint: .documentBuilder).presentationDetents([.large])
+        }
+        .sheet(item: $documentToOpen) { document in
+            DocumentViewerView(document: document)
+        }
+        .confirmationDialog(
+            L10n.text("이 문서를 삭제할까요?"),
+            isPresented: Binding(
+                get: { documentPendingDeletion != nil },
+                set: { if !$0 { documentPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(L10n.text("삭제"), role: .destructive) {
+                if let document = documentPendingDeletion { delete(document) }
+                documentPendingDeletion = nil
+            }
+            Button(L10n.text("취소"), role: .cancel) { documentPendingDeletion = nil }
+        }
         .fullScreenCover(isPresented: $showsDocumentScanner) {
             DocumentScannerView { images in
                 importScannedDocuments(images)
@@ -412,7 +459,7 @@ struct AlbumView: View {
             MediaGridCell(
                 item: item,
                 isSelected: selection.contains(item.id),
-                usesOriginalAspect: gridMode == .original,
+                usesOriginalAspect: gridMode == .original || isDocumentTemplate,
                 showsSelectionControl: isSelecting
             )
         }
@@ -420,6 +467,51 @@ struct AlbumView: View {
             .contentShape(Rectangle())
             .contextMenu { contextMenu(for: item) }
             .accessibilityAddTraits(selection.contains(item.id) ? .isSelected : [])
+    }
+
+    /// Built documents are listed above the source photos and look different from
+    /// them: a PDF is a finished thing, not another page to sort.
+    private var documentSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.text("만든 문서"))
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            LazyVGrid(columns: TemplateGridLayout.columns, spacing: 12) {
+                ForEach(documents) { document in
+                    DocumentCard(document: document)
+                        .contentShape(Rectangle())
+                        .onTapGesture { documentToOpen = document }
+                        .contextMenu {
+                            Button(L10n.text("PDF 열기"), systemImage: "doc.text.magnifyingglass") {
+                                documentToOpen = document
+                            }
+                            Button(role: .destructive) {
+                                documentPendingDeletion = document
+                            } label: {
+                                Label(L10n.text("삭제"), systemImage: "trash")
+                            }
+                        }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+    }
+
+    /// The paywall replaces the builder entirely once the free documents are gone —
+    /// opening the builder just to block it at the end would waste the user's time.
+    private func openDocumentBuilder() {
+        if DocumentBuilderUsageStore.hasFreeUseAvailable(isPremium: purchases.isPremium) {
+            showsDocumentBuilder = true
+        } else {
+            showsDocumentPaywall = true
+        }
+    }
+
+    private func delete(_ document: Document) {
+        DocumentBuilderService.remove(document)
+        modelContext.delete(document)
+        try? modelContext.save()
     }
 
     private func qrCard(_ item: MediaItem) -> some View {
@@ -843,7 +935,9 @@ enum TemplateCaptureError: LocalizedError {
     }
 }
 
-private struct DocumentScannerView: UIViewControllerRepresentable {
+/// Shared with the document builder so scanning always goes through Apple's own
+/// edge detection and perspective correction.
+struct DocumentScannerView: UIViewControllerRepresentable {
     @Environment(\.dismiss) private var dismiss
     let completion: ([UIImage]) -> Void
 

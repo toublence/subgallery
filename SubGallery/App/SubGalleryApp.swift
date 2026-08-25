@@ -800,7 +800,7 @@ struct DataStoreBootstrap {
     }
 
     static func make(premiumActive: Bool) -> DataStoreBootstrap {
-        let schema = Schema([MediaItem.self, Album.self, CapturePreset.self])
+        let schema = Schema([MediaItem.self, Album.self, CapturePreset.self, Document.self])
         if StoreScreenshotMode.isEnabled {
             let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
             let container = try! ModelContainer(for: schema, configurations: [configuration])

@@ -43,6 +43,7 @@ struct LibraryView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.requestReview) private var requestReview
     @Query(sort: \Album.sortOrder) private var albums: [Album]
+    @Query(sort: \Document.createdAt, order: .reverse) private var documents: [Document]
     @Query(sort: \MediaItem.createdAt, order: .reverse) private var media: [MediaItem]
     @Binding var isCameraPresented: Bool
     @Binding var captureContext: CaptureContext
@@ -72,6 +73,7 @@ struct LibraryView: View {
     @State private var showsPremium = false
     @State private var importError: String?
     @State private var searchText = StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "search" ? StoreScreenshotMode.searchQuery : ""
+    @State private var documentToOpen: Document?
     @State private var viewerItem: MediaItem?
     @State private var renamingAlbum: Album?
     @State private var renameAlbumText = ""
@@ -323,6 +325,9 @@ struct LibraryView: View {
             maxSelectionCount: 0,
             matching: .any(of: [.images, .videos])
         )
+        .sheet(item: $documentToOpen) { document in
+            DocumentViewerView(document: document)
+        }
         .sheet(isPresented: $showsSettings) {
             SettingsView().presentationDetents([.large])
         }
@@ -504,6 +509,19 @@ struct LibraryView: View {
         }
     }
 
+    /// Built documents are searchable by their title and their recognised text, so a
+    /// phrase inside a scanned contract finds the PDF and not only the source photo.
+    private var documentSearchResults: [Document] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        let normalizedQuery = normalizedSearchText(query)
+        return documents.filter { document in
+            document.searchText.localizedCaseInsensitiveContains(query)
+                || (!normalizedQuery.isEmpty
+                    && normalizedSearchText(document.searchText).contains(normalizedQuery))
+        }
+    }
+
     private func normalizedSearchText(_ text: String) -> String {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
@@ -511,6 +529,25 @@ struct LibraryView: View {
     }
 
     private var searchResultsView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !documentSearchResults.isEmpty {
+                Text(L10n.text("만든 문서"))
+                    .font(.headline)
+                    .padding(.horizontal, 2)
+                LazyVGrid(columns: TemplateGridLayout.columns, spacing: 12) {
+                    ForEach(documentSearchResults) { document in
+                        DocumentCard(document: document)
+                            .contentShape(Rectangle())
+                            .onTapGesture { documentToOpen = document }
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+            mediaSearchResults
+        }
+    }
+
+    private var mediaSearchResults: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 94, maximum: 180), spacing: 2)], spacing: 2) {
             ForEach(searchResults) { item in
                 MediaGridCell(item: item, isSelected: false)
@@ -518,7 +555,9 @@ struct LibraryView: View {
             }
         }
         .overlay {
-            if searchResults.isEmpty {
+            // Documents match separately, so "no results" only holds when neither
+            // media nor documents matched.
+            if searchResults.isEmpty && documentSearchResults.isEmpty {
                 ContentUnavailableView.search(text: searchText)
                     .frame(minHeight: 420)
             }

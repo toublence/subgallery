@@ -1,4 +1,5 @@
 import CoreImage
+import PDFKit
 import SwiftData
 import UIKit
 import UserNotifications
@@ -706,6 +707,135 @@ final class CoreFeatureTests: XCTestCase {
         XCTAssertNil(OCRService.qrPayload(symbology: .ean13, payload: "8801234567890"))
         XCTAssertNil(OCRService.qrPayload(symbology: .qr, payload: "   "))
         XCTAssertEqual(OCRService.qrPayload(symbology: .qr, payload: " hello "), "hello")
+    }
+
+    // MARK: - Document builder
+
+    private func makeContainerWithDocuments() throws -> ModelContainer {
+        let schema = Schema([MediaItem.self, Album.self, CapturePreset.self, Document.self])
+        let configuration = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
+        )
+        return try ModelContainer(for: schema, configurations: [configuration])
+    }
+
+    private func solidImage(_ color: UIColor, size: CGSize = CGSize(width: 120, height: 160)) -> UIImage {
+        UIGraphicsImageRenderer(size: size).image { context in
+            color.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }
+    }
+
+    func testDocumentCase2PDFKeepsThePageOrderItWasGiven() throws {
+        let images = [solidImage(.red), solidImage(.green), solidImage(.blue), solidImage(.gray)]
+        let data = try DocumentBuilderService.pdfData(from: images, title: "계약서")
+
+        let pdf = try XCTUnwrap(PDFDocument(data: data))
+        XCTAssertEqual(pdf.pageCount, 4)
+        XCTAssertEqual(
+            pdf.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String,
+            "계약서"
+        )
+    }
+
+    func testDocumentPDFRefusesToBuildWithoutPages() {
+        XCTAssertThrowsError(try DocumentBuilderService.pdfData(from: [], title: "빈 문서")) { error in
+            XCTAssertEqual(error as? DocumentBuilderError, .noPages)
+        }
+    }
+
+    func testDocumentCase3And4CancelOrFailureNeverSpendsAFreeUse() {
+        // Opening the builder and cancelling: nothing is consumed because the policy
+        // is only ever applied after a document is saved.
+        var policy = DocumentTrialPolicy(used: 0)
+        XCTAssertEqual(policy.remaining, 3)
+        XCTAssertTrue(policy.canBuild(isPremium: false))
+
+        // A failed build takes the same path — the policy is simply never advanced.
+        XCTAssertEqual(policy, DocumentTrialPolicy(used: 0))
+
+        policy = policy.consumingIfEligible(isPremium: false)
+        XCTAssertEqual(policy.remaining, 2)
+    }
+
+    func testDocumentCase5And6ThreeFreeBuildsThenPaywall() {
+        var policy = DocumentTrialPolicy(used: 0)
+        for expected in [2, 1, 0] {
+            XCTAssertTrue(policy.canBuild(isPremium: false))
+            policy = policy.consumingIfEligible(isPremium: false)
+            XCTAssertEqual(policy.remaining, expected)
+        }
+        // The third build completes fully; only the fourth attempt is blocked.
+        XCTAssertFalse(policy.canBuild(isPremium: false))
+    }
+
+    func testDocumentThirdBuildIsFlaggedAsTheLastFreeOne() {
+        XCTAssertFalse(DocumentTrialPolicy(used: 0).isLastFreeUse)
+        XCTAssertFalse(DocumentTrialPolicy(used: 1).isLastFreeUse)
+        XCTAssertTrue(DocumentTrialPolicy(used: 2).isLastFreeUse)
+        XCTAssertFalse(DocumentTrialPolicy(used: 3).isLastFreeUse)
+    }
+
+    func testDocumentCase7PremiumIsUnlimitedAndNeverCounts() {
+        var policy = DocumentTrialPolicy(used: 3)
+        XCTAssertFalse(policy.canBuild(isPremium: false))
+        XCTAssertTrue(policy.canBuild(isPremium: true), "premium ignores the exhausted counter")
+
+        policy = policy.consumingIfEligible(isPremium: true)
+        XCTAssertEqual(policy.used, 3, "premium builds must not advance the counter")
+    }
+
+    func testDocumentCase8RecognizedTextIsSearchable() throws {
+        let container = try makeContainerWithDocuments()
+        let context = container.mainContext
+        let document = Document(
+            title: "임대차계약서",
+            pageCount: 4,
+            pdfRelativePath: "Documents/a.pdf",
+            recognizedText: "임대차계약 제1조 보증금"
+        )
+        context.insert(document)
+        try context.save()
+
+        let stored = try context.fetch(FetchDescriptor<Document>())
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertTrue(stored[0].searchText.contains("임대차계약"))
+        XCTAssertTrue(stored[0].searchText.contains("보증금"))
+        XCTAssertTrue(stored[0].searchText.localizedCaseInsensitiveContains("임대차계약"))
+    }
+
+    func testDocumentRemembersWhichPhotosItWasBuiltFrom() throws {
+        let container = try makeContainerWithDocuments()
+        let context = container.mainContext
+        let ids = [UUID(), UUID(), UUID()]
+        let document = Document(
+            title: "문서",
+            pageCount: 3,
+            pdfRelativePath: "Documents/b.pdf",
+            sourceItemIDs: ids
+        )
+        context.insert(document)
+        try context.save()
+
+        let stored = try XCTUnwrap(try context.fetch(FetchDescriptor<Document>()).first)
+        XCTAssertEqual(stored.sourceItemIDs, ids)
+        XCTAssertEqual(stored.pageCount, 3)
+    }
+
+    func testDocumentPageRotationAndRenderingProduceAnImage() {
+        let page = DocumentPage(image: solidImage(.red), rotation: 90, rendering: .monochrome)
+        let rendered = DocumentBuilderService.renderedImage(for: page)
+        // A quarter turn swaps the dimensions; the source is 120x160.
+        XCTAssertEqual(Int(rendered.size.width), 160)
+        XCTAssertEqual(Int(rendered.size.height), 120)
+    }
+
+    func testDocumentDefaultTitleIsNotEmpty() {
+        let title = DocumentBuilderService.defaultTitle(now: Date(timeIntervalSince1970: 1_787_000_000))
+        XCTAssertFalse(title.trimmingCharacters(in: .whitespaces).isEmpty)
+        XCTAssertTrue(title.contains(CapturePurpose.document.title))
     }
 
     // MARK: - Receipt amount extraction

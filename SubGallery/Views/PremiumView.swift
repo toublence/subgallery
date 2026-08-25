@@ -185,6 +185,7 @@ final class PurchaseManager: ObservableObject {
 enum PremiumEntryPoint {
     case general
     case receiptReport
+    case documentBuilder
 }
 
 struct PremiumView: View {
@@ -263,19 +264,11 @@ struct PremiumView: View {
                     .font(.headline.bold())
             }
 
-            Text(L10n.text(
-                entryPoint == .receiptReport
-                    ? "영수증이 지출 리포트가 됩니다."
-                    : "사진은 따로. 정리는 자동으로."
-            ))
+            Text(L10n.text(headlineKey))
                 .font(.title.bold())
                 .multilineTextAlignment(.center)
 
-            Text(L10n.text(
-                entryPoint == .receiptReport
-                    ? "지출 흐름, 자주 결제한 곳, 큰 결제와 기간별 변화를 제한 없이 확인하세요."
-                    : "자동 분류, 정리 센터, OCR 스마트 작업으로 쌓인 사진을 더 편하게 관리하세요."
-            ))
+            Text(L10n.text(subheadlineKey))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -283,8 +276,32 @@ struct PremiumView: View {
         }
     }
 
+    private var headlineKey: String {
+        switch entryPoint {
+        case .receiptReport: "영수증이 지출 리포트가 됩니다."
+        case .documentBuilder: "사진을 하나의 문서로 만드세요."
+        case .general: "사진은 따로. 정리는 자동으로."
+        }
+    }
+
+    private var subheadlineKey: String {
+        switch entryPoint {
+        case .receiptReport: "지출 흐름, 자주 결제한 곳, 큰 결제와 기간별 변화를 제한 없이 확인하세요."
+        case .documentBuilder: "여러 페이지를 정리하고 OCR이 적용된 PDF로 만들어 언제든 검색하고 공유하세요."
+        case .general: "자동 분류, 정리 센터, OCR 스마트 작업으로 쌓인 사진을 더 편하게 관리하세요."
+        }
+    }
+
     private var benefits: some View {
         VStack(spacing: 0) {
+            if entryPoint == .documentBuilder {
+                PremiumBenefitRow(
+                    symbol: "doc.badge.plus",
+                    title: "문서 만들기 무제한",
+                    detail: "여러 장의 문서 사진을 순서대로 정리해 검색 가능한 PDF로 만듭니다."
+                )
+                Divider().padding(.leading, 52)
+            }
             if entryPoint == .receiptReport {
                 PremiumBenefitRow(
                     symbol: "chart.bar.xaxis",
