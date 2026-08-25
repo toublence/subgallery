@@ -240,7 +240,7 @@ enum DocumentBuilderService {
 
         let directory = MediaStorage.url(for: directoryName)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let fileName = "\(UUID().uuidString).pdf"
+        let fileName = availablePDFFileName(in: directory)
         let destination = directory.appending(path: fileName)
         do {
             try data.write(to: destination, options: .atomic)
@@ -262,6 +262,23 @@ enum DocumentBuilderService {
     static func defaultTitle(now: Date = .now) -> String {
         let date = L10n.date(now, dateStyle: .numeric, timeStyle: .omitted)
         return "\(date) \(CapturePurpose.document.title)"
+    }
+
+    static func availablePDFFileName(in directory: URL, now: Date = .now) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        let baseName = "\(formatter.string(from: now)) \(L10n.text("pdf.default_filename"))"
+        var fileName = "\(baseName).pdf"
+        var copyNumber = 2
+        while FileManager.default.fileExists(atPath: directory.appending(path: fileName).path) {
+            fileName = "\(baseName) \(copyNumber).pdf"
+            copyNumber += 1
+        }
+        return fileName
     }
 
     static func remove(_ document: Document) {

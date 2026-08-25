@@ -10,6 +10,9 @@ enum MediaSource: String, Codable {
     case camera
     case photos
     case files
+    /// Authored inside SubGallery rather than captured or imported, so the detail
+    /// screen can say so without re-reading the image.
+    case generated
 }
 
 enum AppStartScreen: String, CaseIterable, Identifiable {

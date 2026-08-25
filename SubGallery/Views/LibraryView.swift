@@ -82,7 +82,6 @@ struct LibraryView: View {
     @State private var rulesAlbum: Album?
     @State private var classificationItem: MediaItem?
     @State private var automaticClassificationNotice: SmartClassificationService.AutomaticClassificationNotice?
-    @State private var showsCleanupCenter = false
     @State private var albumPendingDeletion: Album?
     @State private var navigationPath: [AlbumDestination] = {
         guard StoreScreenshotMode.isEnabled else { return [] }
@@ -177,12 +176,6 @@ struct LibraryView: View {
                             }
                         }
 
-                        if !media.filter({ $0.deletedAt == nil }).isEmpty {
-                            CleanupSummaryCard(summary: CleanupSummary(items: media)) {
-                                if purchases.isPremium { showsCleanupCenter = true }
-                                else { showsPremium = true }
-                            }
-                        }
                     }
                     .padding(.horizontal, 20)
                     .padding(.bottom, 104)
@@ -349,10 +342,6 @@ struct LibraryView: View {
         .sheet(item: $classificationItem) { item in
             SmartClassificationSuggestionView(item: item)
                 .presentationDetents([.medium, .large])
-        }
-        .sheet(isPresented: $showsCleanupCenter) {
-            CleanupCenterView()
-                .presentationDetents([.large])
         }
         .fullScreenCover(item: $viewerItem) { item in
             MediaViewer(items: searchResults, initialID: item.id, isRecentlyDeleted: false)
@@ -852,52 +841,6 @@ private struct CleanupSummary {
         case .oldTemporary: oldTemporary
         case .recommendation: recommendations
         }
-    }
-}
-
-private struct CleanupSummaryCard: View {
-    let summary: CleanupSummary
-    let open: () -> Void
-
-    var body: some View {
-        Button(action: open) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Label(
-                        L10n.format("정리할 사진 %d장", summary.totalCount),
-                        systemImage: "checklist"
-                    )
-                    .font(.headline.bold())
-                    Spacer()
-                    Text(L10n.text("정리하기"))
-                        .font(.subheadline.bold())
-                        .foregroundStyle(Color.accentColor)
-                    Image(systemName: "chevron.forward")
-                        .font(.caption.bold())
-                        .foregroundStyle(Color.accentColor)
-                }
-                HStack(spacing: 14) {
-                    cleanupMetric("오늘 정리", count: summary.today.count)
-                    cleanupMetric("곧 만료", count: summary.soon.count)
-                    cleanupMetric("완료 대기", count: summary.waiting.count)
-                }
-            }
-            .padding(16)
-            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.accentColor.opacity(0.25))
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func cleanupMetric(_ title: String, count: Int) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(L10n.text(title)).font(.caption).foregroundStyle(.secondary)
-            Text(L10n.format("%d장", count)).font(.subheadline.bold())
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

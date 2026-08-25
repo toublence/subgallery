@@ -118,6 +118,8 @@ struct AlbumView: View {
     @State private var showsDocumentScanner = false
     @State private var showsDocumentBuilder = false
     @State private var showsDocumentPaywall = false
+    @State private var showsQRBuilder = false
+    @State private var showsQRPaywall = false
     @State private var documentToOpen: Document?
     @State private var documentPendingDeletion: Document?
     @State private var showsTravelMap = false
@@ -307,6 +309,12 @@ struct AlbumView: View {
                         }
                         .accessibilityLabel(L10n.text("문서 만들기"))
                     }
+                    if case .template(.qr) = destination {
+                        Button { openQRBuilder() } label: {
+                            Image(systemName: "qrcode")
+                        }
+                        .accessibilityLabel(L10n.text("QR 만들기"))
+                    }
                     if case .template(.travel) = destination {
                         Button {
                             openTravelMap()
@@ -402,6 +410,10 @@ struct AlbumView: View {
         }
         .sheet(isPresented: $showsDocumentPaywall) {
             PremiumView(entryPoint: .documentBuilder).presentationDetents([.large])
+        }
+        .sheet(isPresented: $showsQRBuilder) { QRCodeBuilderView() }
+        .sheet(isPresented: $showsQRPaywall) {
+            PremiumView(entryPoint: .qrBuilder).presentationDetents([.large])
         }
         .sheet(item: $documentToOpen) { document in
             DocumentViewerView(document: document)
@@ -505,6 +517,16 @@ struct AlbumView: View {
             showsDocumentBuilder = true
         } else {
             showsDocumentPaywall = true
+        }
+    }
+
+    /// Same rule as the document builder: once the free codes are gone the paywall
+    /// replaces the builder rather than appearing after the work is done.
+    private func openQRBuilder() {
+        if QRBuilderUsageStore.hasFreeUseAvailable(isPremium: purchases.isPremium) {
+            showsQRBuilder = true
+        } else {
+            showsQRPaywall = true
         }
     }
 

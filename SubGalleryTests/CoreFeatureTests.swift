@@ -709,6 +709,156 @@ final class CoreFeatureTests: XCTestCase {
         XCTAssertEqual(OCRService.qrPayload(symbology: .qr, payload: " hello "), "hello")
     }
 
+    // MARK: - QR builder
+
+    /// Round-trips a generated payload back through the reader the app uses on real
+    /// scans. If this passes, another device's scanner sees the same thing.
+    private func roundTrip(_ input: QRBuilderInput) throws -> QRContentInfo {
+        let payload = try QRCodeBuilderService.payload(for: input)
+        return QRContentService.parse(payload)
+    }
+
+    func testQRBuilderCase2URLPayloadRoundTrips() throws {
+        let info = try roundTrip(.url("https://example.com"))
+        XCTAssertEqual(info.type, .url)
+        XCTAssertEqual(info.rawValue, "https://example.com")
+        XCTAssertEqual(info.primaryAction, .open)
+
+        XCTAssertThrowsError(try QRCodeBuilderService.payload(for: .url("example.com")))
+        XCTAssertThrowsError(try QRCodeBuilderService.payload(for: .url("ftp://example.com")))
+    }
+
+    func testQRBuilderCase3WiFiUsesTheStandardPayload() throws {
+        let payload = try QRCodeBuilderService.payload(
+            for: .wifi(ssid: "Namslab", password: "12345678", security: .wpa, isHidden: false)
+        )
+        XCTAssertEqual(payload, "WIFI:T:WPA;S:Namslab;P:12345678;;")
+
+        let info = QRContentService.parse(payload)
+        XCTAssertEqual(info.type, .wifi)
+        XCTAssertEqual(info.fields.first { $0.label == "SSID" }?.value, "Namslab")
+        XCTAssertEqual(info.fields.first { $0.isSensitive }?.value, "12345678")
+    }
+
+    func testQRBuilderWiFiEscapesSeparatorCharacters() throws {
+        let payload = try QRCodeBuilderService.payload(
+            for: .wifi(ssid: "Cafe;Wifi", password: "pa:ss;word", security: .wpa, isHidden: true)
+        )
+        // Unescaped, these characters would end the field and corrupt the network name.
+        XCTAssertTrue(payload.contains(#"S:Cafe\;Wifi"#))
+        XCTAssertTrue(payload.contains("H:true"))
+
+        let info = QRContentService.parse(payload)
+        XCTAssertEqual(info.fields.first { $0.label == "SSID" }?.value, "Cafe;Wifi")
+        XCTAssertEqual(info.fields.first { $0.isSensitive }?.value, "pa:ss;word")
+    }
+
+    func testQRBuilderOpenNetworkOmitsThePasswordField() throws {
+        let payload = try QRCodeBuilderService.payload(
+            for: .wifi(ssid: "Guest", password: "ignored", security: .none, isHidden: false)
+        )
+        XCTAssertFalse(payload.contains("ignored"))
+        XCTAssertTrue(payload.contains("T:nopass"))
+    }
+
+    func testQRBuilderRemainingKindsRoundTrip() throws {
+        XCTAssertEqual(try roundTrip(.text("회의실 비밀번호 1234")).type, .text)
+        XCTAssertEqual(try roundTrip(.phone("010-1234-5678")).type, .phone)
+        XCTAssertEqual(try roundTrip(.email(address: "a@b.com", subject: "Hi", body: "")).type, .email)
+
+        let location = try roundTrip(.location(latitude: 37.5665, longitude: 126.9780))
+        XCTAssertEqual(location.type, .location)
+        XCTAssertEqual(location.coordinate, QRCoordinate(latitude: 37.5665, longitude: 126.9780))
+
+        let contact = try roundTrip(
+            .contact(name: "홍길동", phone: "010-1111-2222", email: "hong@example.com", organization: "남슬랩")
+        )
+        XCTAssertEqual(contact.type, .contact)
+        XCTAssertEqual(contact.title, "홍길동")
+        XCTAssertEqual(contact.fields.first { $0.label == L10n.text("회사") }?.value, "남슬랩")
+    }
+
+    func testQRBuilderRejectsEmptyOrInvalidInput() {
+        XCTAssertThrowsError(try QRCodeBuilderService.payload(for: .text("   ")))
+        XCTAssertThrowsError(try QRCodeBuilderService.payload(for: .phone("")))
+        XCTAssertThrowsError(try QRCodeBuilderService.payload(for: .email(address: "nope", subject: "", body: "")))
+        XCTAssertThrowsError(try QRCodeBuilderService.payload(for: .location(latitude: 200, longitude: 0)))
+        XCTAssertThrowsError(
+            try QRCodeBuilderService.payload(for: .contact(name: "", phone: "", email: "", organization: ""))
+        )
+        XCTAssertThrowsError(
+            try QRCodeBuilderService.payload(for: .wifi(ssid: " ", password: "x", security: .wpa, isHidden: false))
+        )
+    }
+
+    func testQRBuilderCase10GeneratedImageIsReadableByTheScanner() throws {
+        try XCTSkipUnless(
+            Self.visionDetectsQRCodes,
+            "Vision cannot create an inference context on this host; run on a device or macOS."
+        )
+        let payload = try QRCodeBuilderService.payload(
+            for: .wifi(ssid: "Namslab", password: "12345678", security: .wpa, isHidden: false)
+        )
+        let image = try QRCodeBuilderService.image(for: payload)
+        let cgImage = try XCTUnwrap(image.cgImage)
+
+        let request = VNDetectBarcodesRequest()
+        request.symbologies = [.qr]
+        try VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:]).perform([request])
+        let decoded = (request.results ?? []).compactMap(\.payloadStringValue)
+
+        XCTAssertEqual(decoded.first, payload, "a real scanner must read back exactly what was encoded")
+    }
+
+    func testQRBuilderCase4And5PreviewOrFailureNeverSpendsAFreeUse() {
+        var policy = QRBuilderTrialPolicy(used: 0)
+        // Generating a preview and cancelling never advances the policy.
+        XCTAssertEqual(policy.remaining, 5)
+        XCTAssertTrue(policy.canBuild(isPremium: false))
+        XCTAssertEqual(policy, QRBuilderTrialPolicy(used: 0))
+
+        policy = policy.consumingIfEligible(isPremium: false)
+        XCTAssertEqual(policy.remaining, 4)
+    }
+
+    func testQRBuilderCase6And7FiveFreeSavesThenPaywall() {
+        var policy = QRBuilderTrialPolicy(used: 0)
+        for expected in [4, 3, 2, 1, 0] {
+            XCTAssertTrue(policy.canBuild(isPremium: false))
+            policy = policy.consumingIfEligible(isPremium: false)
+            XCTAssertEqual(policy.remaining, expected)
+        }
+        XCTAssertFalse(policy.canBuild(isPremium: false), "the sixth attempt is blocked")
+        XCTAssertTrue(QRBuilderTrialPolicy(used: 4).isLastFreeUse)
+    }
+
+    func testQRBuilderCase8PremiumIsUnlimitedAndNeverCounts() {
+        var policy = QRBuilderTrialPolicy(used: 5)
+        XCTAssertFalse(policy.canBuild(isPremium: false))
+        XCTAssertTrue(policy.canBuild(isPremium: true))
+        policy = policy.consumingIfEligible(isPremium: true)
+        XCTAssertEqual(policy.used, 5)
+    }
+
+    func testQRBuilderCase9GeneratedItemIsStoredWithItsKnownPayload() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let payload = try QRCodeBuilderService.payload(for: .url("https://namslab.com"))
+
+        let item = MediaItem(kind: .photo, source: .generated, localPath: "Media/qr.png")
+        item.templatePurpose = .qr
+        item.classificationStatus = .applied
+        item.detectedQRCodes = [payload]
+        context.insert(item)
+        try context.save()
+
+        XCTAssertEqual(item.source, .generated, "provenance distinguishes it from a scanned QR")
+        XCTAssertEqual(item.templatePurpose, .qr)
+        XCTAssertFalse(item.isUnclassified)
+        XCTAssertEqual(item.primaryQRContent?.type, .url)
+        XCTAssertEqual(item.primaryQRContent?.rawValue, "https://namslab.com")
+    }
+
     // MARK: - Document builder
 
     private func makeContainerWithDocuments() throws -> ModelContainer {

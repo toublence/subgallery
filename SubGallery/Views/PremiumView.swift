@@ -186,6 +186,7 @@ enum PremiumEntryPoint {
     case general
     case receiptReport
     case documentBuilder
+    case qrBuilder
 }
 
 struct PremiumView: View {
@@ -280,6 +281,7 @@ struct PremiumView: View {
         switch entryPoint {
         case .receiptReport: "영수증이 지출 리포트가 됩니다."
         case .documentBuilder: "사진을 하나의 문서로 만드세요."
+        case .qrBuilder: "QR을 직접 만들어 보관하세요."
         case .general: "사진은 따로. 정리는 자동으로."
         }
     }
@@ -288,12 +290,21 @@ struct PremiumView: View {
         switch entryPoint {
         case .receiptReport: "지출 흐름, 자주 결제한 곳, 큰 결제와 기간별 변화를 제한 없이 확인하세요."
         case .documentBuilder: "여러 페이지를 정리하고 OCR이 적용된 PDF로 만들어 언제든 검색하고 공유하세요."
+        case .qrBuilder: "웹사이트, Wi-Fi, 연락처, 위치 등 자주 쓰는 정보를 QR로 만들고 언제든 바로 보여주세요."
         case .general: "자동 분류, 정리 센터, OCR 스마트 작업으로 쌓인 사진을 더 편하게 관리하세요."
         }
     }
 
     private var benefits: some View {
         VStack(spacing: 0) {
+            if entryPoint == .qrBuilder {
+                PremiumBenefitRow(
+                    symbol: "qrcode",
+                    title: "QR 만들기 무제한",
+                    detail: "Wi-Fi, 연락처, 링크를 QR로 만들어 보관하고 바로 보여줍니다."
+                )
+                Divider().padding(.leading, 52)
+            }
             if entryPoint == .documentBuilder {
                 PremiumBenefitRow(
                     symbol: "doc.badge.plus",

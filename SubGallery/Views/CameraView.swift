@@ -862,7 +862,9 @@ private struct CameraPersistenceSnapshot: Equatable {
     let destinationAlbumID: String
 }
 
-private final class CaptureLocationProvider: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
+/// Shared with the QR builder's "current location" option so location handling and
+/// its permission prompt exist in one place.
+final class CaptureLocationProvider: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
     @Published private(set) var latestLocation: CLLocation?
     @Published private(set) var authorizationDenied = false
     private let manager = CLLocationManager()

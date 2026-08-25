@@ -177,6 +177,7 @@ struct QRDetailView: View {
     @State private var message: String?
     @State private var revealedFields = Set<String>()
     @State private var showsCompleteConfirmation = false
+    @State private var showsFullScreenQR = false
     @State private var shareValue: String?
 
     private var contents: [QRContentInfo] { item.qrContents }
@@ -210,9 +211,18 @@ struct QRDetailView: View {
                             QRActionRunner.markUsed(item, in: modelContext)
                         }
                     }
+                    Button(L10n.text("QR 크게 보기"), systemImage: "arrow.up.left.and.arrow.down.right") {
+                        showsFullScreenQR = true
+                    }
                     Button(L10n.text("원본 사진 보기"), systemImage: "photo") {
                         dismiss()
                         onShowOriginal()
+                    }
+                    if item.source == .generated {
+                        // Quiet provenance line rather than a badge on every row.
+                        LabeledContent(L10n.text("출처")) {
+                            Text(L10n.text("직접 생성"))
+                        }
                     }
                 }
 
@@ -241,6 +251,11 @@ struct QRDetailView: View {
             set: { if $0 == nil { shareValue = nil } }
         )) { shareable in
             ActivityShareSheet(urls: [], text: shareable.value)
+        }
+        .fullScreenCover(isPresented: $showsFullScreenQR) {
+            if let image = UIImage(contentsOfFile: item.mediaURL.path) {
+                QRFullScreenView(image: image, title: item.primaryQRContent?.title ?? L10n.text("QR 코드"))
+            }
         }
         .confirmationDialog(
             L10n.text("이 사진을 완료 처리할까요?"),
