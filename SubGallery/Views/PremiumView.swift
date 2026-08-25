@@ -179,11 +179,21 @@ final class PurchaseManager: ObservableObject {
     #endif
 }
 
+enum PremiumEntryPoint {
+    case general
+    case receiptReport
+}
+
 struct PremiumView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var purchases = PurchaseManager.shared
     @State private var selectedID = PurchaseManager.yearlyID
     @State private var showsComparison = false
+    let entryPoint: PremiumEntryPoint
+
+    init(entryPoint: PremiumEntryPoint = .general) {
+        self.entryPoint = entryPoint
+    }
 
     private let privacyURL = URL(string: "https://motionfit.fit/subgallery/privacy/")!
     private let termsURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
@@ -252,11 +262,19 @@ struct PremiumView: View {
                     .font(.headline.bold())
             }
 
-            Text(L10n.text("사진은 따로. 정리는 자동으로."))
+            Text(L10n.text(
+                entryPoint == .receiptReport
+                    ? "영수증이 지출 리포트가 됩니다."
+                    : "사진은 따로. 정리는 자동으로."
+            ))
                 .font(.title.bold())
                 .multilineTextAlignment(.center)
 
-            Text(L10n.text("자동 분류, 정리 센터, OCR 스마트 작업으로 쌓인 사진을 더 편하게 관리하세요."))
+            Text(L10n.text(
+                entryPoint == .receiptReport
+                    ? "지출 흐름, 자주 결제한 곳, 큰 결제와 기간별 변화를 제한 없이 확인하세요."
+                    : "자동 분류, 정리 센터, OCR 스마트 작업으로 쌓인 사진을 더 편하게 관리하세요."
+            ))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -266,6 +284,14 @@ struct PremiumView: View {
 
     private var benefits: some View {
         VStack(spacing: 0) {
+            if entryPoint == .receiptReport {
+                PremiumBenefitRow(
+                    symbol: "chart.bar.xaxis",
+                    title: "지출 리포트 무제한",
+                    detail: "영수증으로 지출 흐름과 결제 패턴을 언제든 다시 확인합니다."
+                )
+                Divider().padding(.leading, 52)
+            }
             PremiumBenefitRow(
                 symbol: "wand.and.stars",
                 title: "자동으로 분류",

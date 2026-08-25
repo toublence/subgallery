@@ -420,7 +420,6 @@ struct CameraView: View {
         switch purpose {
         case .general: "camera"
         case .receipt: "receipt"
-        case .parking: "car.fill"
         case .document: "doc.text"
         case .qr: "qrcode"
         case .temporary: "clock"

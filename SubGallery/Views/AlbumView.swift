@@ -3,6 +3,7 @@ import Photos
 import PhotosUI
 import SwiftData
 import SwiftUI
+import UIKit
 
 private struct TemporaryGroup: Identifiable {
     let title: String
@@ -158,17 +159,20 @@ struct AlbumView: View {
     }
 
     var body: some View {
+        if case .template(.receipt) = destination {
+            // Receipts get a screen of their own: merchant, amount and date lead,
+            // and the photo is supporting evidence rather than the content.
+            ReceiptTemplateView(isCameraPresented: $isCameraPresented)
+        } else {
+            standardBody
+        }
+    }
+
+    private var standardBody: some View {
         ScrollView {
             if case .smart(.temporary) = destination { temporarySummary }
-            if case .template(.receipt) = destination {
-                LazyVStack(spacing: 10) {
-                    ForEach(items) { item in receiptRow(item) }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 20)
-            } else if case .template(.qr) = destination {
-                LazyVStack(spacing: 10) {
+            if case .template(.qr) = destination {
+                LazyVGrid(columns: TemplateGridLayout.columns, spacing: 12) {
                     ForEach(items) { item in qrRow(item) }
                 }
                 .padding(.horizontal, 20)
@@ -230,7 +234,18 @@ struct AlbumView: View {
                 }
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
-                if !isSelecting { displayOptionsMenu }
+                if !isSelecting {
+                    if case .template(.travel) = destination {
+                        NavigationLink {
+                            MediaMapView(templatePurpose: .travel, title: CapturePurpose.travel.title)
+                        } label: {
+                            Image(systemName: "map")
+                        }
+                        .accessibilityLabel(L10n.text("지도"))
+                        .disabled(baseItems.isEmpty)
+                    }
+                    displayOptionsMenu
+                }
                 Button(L10n.text(isSelecting ? "완료" : "선택")) {
                     setSelecting(!isSelecting)
                 }
@@ -349,7 +364,7 @@ struct AlbumView: View {
     }
 
     private func qrRow(_ item: MediaItem) -> some View {
-        QRInfoRow(
+        QRInfoCard(
             item: item,
             isSelecting: isSelecting,
             isSelected: selection.contains(item.id),
@@ -364,44 +379,6 @@ struct AlbumView: View {
                 }
             }
         )
-        .contextMenu { contextMenu(for: item) }
-        .accessibilityAddTraits(selection.contains(item.id) ? .isSelected : [])
-    }
-
-    private func receiptRow(_ item: MediaItem) -> some View {
-        Button {
-            if isSelecting { toggle(item.id) } else { viewerItem = item }
-        } label: {
-            HStack(spacing: 14) {
-                MediaThumbnail(item: item)
-                    .frame(width: 76, height: 76)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(item.receiptMerchant.isEmpty ? L10n.text("영수증 정보") : item.receiptMerchant)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Text((item.receiptDate ?? item.detectedDates.first ?? item.createdAt).formatted(
-                        date: .abbreviated,
-                        time: .omitted
-                    ))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
-                if !item.receiptAmount.isEmpty {
-                    Text(item.receiptAmount)
-                        .font(.headline.monospacedDigit())
-                        .lineLimit(1)
-                }
-                if isSelecting {
-                    Image(systemName: selection.contains(item.id) ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(selection.contains(item.id) ? Color.accentColor : Color.secondary)
-                }
-            }
-            .padding(10)
-            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
-        }
-        .buttonStyle(.plain)
         .contextMenu { contextMenu(for: item) }
         .accessibilityAddTraits(selection.contains(item.id) ? .isSelected : [])
     }
@@ -430,14 +407,6 @@ struct AlbumView: View {
                 }
             }
             Divider()
-            if case .template(.travel) = destination {
-                NavigationLink {
-                    MediaMapView(templatePurpose: .travel, title: CapturePurpose.travel.title)
-                } label: {
-                    Label(L10n.text("지도"), systemImage: "map")
-                }
-                .disabled(baseItems.isEmpty)
-            }
             Button { setSelecting(true) } label: { Label(L10n.text("선택"), systemImage: "checkmark.circle") }
         } label: {
             Label(L10n.text("보기 옵션"), systemImage: "ellipsis.circle")

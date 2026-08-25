@@ -438,7 +438,6 @@ struct LibraryView: View {
         switch purpose {
         case .receipt: "receipt"
         case .travel: "airplane"
-        case .parking: "car"
         case .document: "doc.text"
         case .qr: "qrcode"
         default: "folder"
@@ -449,7 +448,6 @@ struct LibraryView: View {
         switch purpose {
         case .receipt: L10n.text("지출 리포트")
         case .travel: L10n.text("사진 지도")
-        case .parking: L10n.text("위치 · 완료")
         case .document: L10n.text("OCR · PDF")
         case .qr: L10n.text("열기 · 복사")
         default: ""

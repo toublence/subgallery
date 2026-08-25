@@ -187,8 +187,6 @@ private struct CaptureFlowPreview: View {
             VStack(spacing: 0) {
                 DestinationRow(title: L10n.text("영수증"), retention: L10n.text("30일"), symbol: "receipt.fill", color: .orange)
                 Divider().padding(.leading, 48)
-                DestinationRow(title: L10n.text("주차"), retention: L10n.text("완료할 때까지"), symbol: "car.fill", color: .indigo)
-                Divider().padding(.leading, 48)
                 DestinationRow(title: L10n.text("여행"), retention: L10n.text("계속 보관"), symbol: "airplane", color: .blue)
             }
             .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))

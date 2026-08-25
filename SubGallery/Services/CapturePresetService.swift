@@ -3,6 +3,7 @@ import SwiftData
 @MainActor
 enum CapturePresetService {
     static func seedBuiltIns(in context: ModelContext) {
+        removeLegacyParkingTemplate(in: context)
         migrateLegacyTemplateAlbums(in: context)
         let presets = (try? context.fetch(FetchDescriptor<CapturePreset>())) ?? []
 
@@ -28,10 +29,12 @@ enum CapturePresetService {
         try? context.save()
     }
 
-    static let templatePurposes: [CapturePurpose] = [.receipt, .travel, .parking, .document, .qr]
+    static let templatePurposes: [CapturePurpose] = [.receipt, .travel, .document, .qr]
     private static let allTemplatePurposes: [CapturePurpose] = [
-        .receipt, .travel, .parking, .document, .qr, .temporary
+        .receipt, .travel, .document, .qr, .temporary
     ]
+
+    private static let removedParkingPurposeRaw = "parking"
 
     static func upgradePremiumTemplates(in context: ModelContext) {
         guard PremiumAccess.isActive else { return }
@@ -40,6 +43,45 @@ enum CapturePresetService {
 
     static func canUse(_ preset: CapturePreset, hasPremium: Bool = PremiumAccess.isActive) -> Bool {
         preset.purpose == .general || hasPremium
+    }
+
+    /// Parking was a built-in template in older releases. Remove only the
+    /// system-owned records; user albums and custom presets are left intact.
+    private static func removeLegacyParkingTemplate(in context: ModelContext) {
+        let albums = (try? context.fetch(FetchDescriptor<Album>())) ?? []
+        let legacyAlbums = albums.filter {
+            $0.isBuiltIn && $0.purposeRaw == removedParkingPurposeRaw
+        }
+        let legacyAlbumIDs = Set(legacyAlbums.map(\.id))
+        let items = (try? context.fetch(FetchDescriptor<MediaItem>())) ?? []
+        var didChange = false
+        for item in items {
+            let belongsToLegacyAlbum = item.albumID.map { legacyAlbumIDs.contains($0) } == true
+            guard belongsToLegacyAlbum || item.purposeRaw == removedParkingPurposeRaw else { continue }
+
+            if belongsToLegacyAlbum {
+                item.albumID = nil
+            }
+            item.purposeRaw = CapturePurpose.general.rawValue
+            item.suggestedPurposeRaw = nil
+            item.suggestedAlbumID = nil
+            item.suggestedRetentionRaw = nil
+            if item.albumID == nil {
+                item.classificationStatusRaw = SmartClassificationStatus.none.rawValue
+            }
+            didChange = true
+        }
+
+        let presets = (try? context.fetch(FetchDescriptor<CapturePreset>())) ?? []
+        for preset in presets where preset.isBuiltIn && preset.purposeRaw == removedParkingPurposeRaw {
+            context.delete(preset)
+            didChange = true
+        }
+        legacyAlbums.forEach(context.delete)
+        if !legacyAlbums.isEmpty { didChange = true }
+        if didChange {
+            try? context.save()
+        }
     }
 
     static func migrateLegacyTemplateAlbums(in context: ModelContext) {
@@ -78,8 +120,6 @@ enum CapturePresetService {
         switch purpose {
         case .receipt:
             (.thirtyDays, true, false, false, .shareAndComplete)
-        case .parking:
-            (.untilComplete, false, true, true, .findCar)
         case .document:
             (.forever, true, false, false, .automatic)
         case .travel:

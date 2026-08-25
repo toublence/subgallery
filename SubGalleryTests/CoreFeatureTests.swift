@@ -606,6 +606,516 @@ final class CoreFeatureTests: XCTestCase {
         XCTAssertEqual(OCRService.qrPayload(symbology: .qr, payload: " hello "), "hello")
     }
 
+    // MARK: - Receipt amount extraction
+
+    private func extractedAmount(_ text: String) -> Decimal? {
+        ReceiptAmountExtractor.extract(from: text, locale: Locale(identifier: "ko_KR"))?.value
+    }
+
+    func testApprovalNumberIsNeverMistakenForTheApprovedAmount() {
+        // The exact shape that produced ₩822,608,619: OCR merges the label and its
+        // identifier onto one line together with the real amount.
+        XCTAssertEqual(
+            extractedAmount("중부식자재마트\n승인번호 822608619 승인금액 15,100원"),
+            15_100
+        )
+        XCTAssertEqual(
+            extractedAmount("중부식자재마트\n승인번호 822608619\n승인금액 15,100원"),
+            15_100
+        )
+        // A membership number happens to contain the character 원.
+        XCTAssertEqual(
+            extractedAmount("회원번호 822608619\n승인금액 15,100원"),
+            15_100
+        )
+    }
+
+    /// Verbatim OCR from the 중부식자재마트 receipt that rendered as ₩15.
+    private var jungbuRecognizedText: String {
+        """
+        2
+        50
+        8
+        0
+        대 표 자:김종민
+        소: 인천 남구 주안로 221(주{
+        판매일:26-08-22 13:29, 토요일 계산대
+        단가 수량
+        과 세 물품 :
+        15,1
+        카드번호 : 5188-31#*-##**-****
+        숭인금액 : 15,100
+        (입시불)
+        승인번호 : 63166807, 전표No : 132926
+        거래ND: 0822608819 계산원: 손희(013)
+        5™
+        B
+        6
+        """
+    }
+
+    func testRealWorldOCRWithMisreadLabelAndTruncatedNumber() {
+        XCTAssertEqual(extractedAmount(jungbuRecognizedText), 15_100)
+    }
+
+    func testTruncatedGroupedNumberIsRejectedRatherThanClipped() {
+        // `15,100` clipped by OCR to `15,1`. Reading `15` from it would be wrong by
+        // three orders of magnitude — the exact shape that rendered as ₩15.
+        XCTAssertNil(extractedAmount("과 세 물품 :\n15,1"))
+        XCTAssertNil(extractedAmount("합계 15,1"))
+        XCTAssertNil(extractedAmount("합계 1,2"))
+        // `1,23` is left alone on purpose: it is a valid European decimal, and
+        // rejecting it would break those receipts to guard a Korean-only case.
+        XCTAssertEqual(extractedAmount("합계 1,23"), Decimal(123) / 100)
+        // Correctly grouped values are unaffected.
+        XCTAssertEqual(extractedAmount("합계 15,100"), 15_100)
+        XCTAssertEqual(extractedAmount("합계 1,234,567원"), 1_234_567)
+    }
+
+    func testGroupedNumbersAreReadWholeInBothConventions() {
+        XCTAssertEqual(extractedAmount("합계 1,234.56"), Decimal(123_456) / 100)
+        XCTAssertEqual(extractedAmount("합계 1.234,56"), Decimal(123_456) / 100)
+        XCTAssertEqual(extractedAmount("합계 15,100"), 15_100)
+        XCTAssertEqual(extractedAmount("합계 1.500"), 1_500)
+    }
+
+    func testMisreadKoreanLabelsStillResolve() {
+        // Vision reads 승 as 숭 on thermal print often enough to matter.
+        XCTAssertEqual(extractedAmount("숭인금액 : 15,100"), 15_100)
+        XCTAssertEqual(extractedAmount("숭인번호 : 63166807\n숭인금액 : 15,100"), 15_100)
+    }
+
+    func testReceiptAmountLabelPriority() {
+        XCTAssertEqual(extractedAmount("합계 9,900원\n승인금액 15,100원"), 15_100)
+        XCTAssertEqual(extractedAmount("결제금액 28,500원\n합계 9,900원"), 28_500)
+        XCTAssertEqual(extractedAmount("합계 9,900원"), 9_900)
+        XCTAssertEqual(extractedAmount("승인금액\n15,100원"), 15_100, "label and value on separate lines")
+    }
+
+    func testReceiptAmountAcrossCommonReceiptShapes() {
+        XCTAssertEqual(extractedAmount("승인금액 15,100원"), 15_100)
+        XCTAssertEqual(extractedAmount("결제금액 28,500원"), 28_500)
+        XCTAssertEqual(extractedAmount("합계 9,900원"), 9_900)
+        XCTAssertEqual(
+            ReceiptAmountExtractor.extract(from: "TOTAL $12.50")?.value,
+            Decimal(1250) / 100
+        )
+    }
+
+    func testIdentifiersAndDatesAreNeverAmounts() {
+        XCTAssertNil(extractedAmount("승인번호 822608619"))
+        XCTAssertNil(extractedAmount("카드번호 1234-5678-9012-3456"))
+        XCTAssertNil(extractedAmount("사업자등록번호 123-45-67890"))
+        XCTAssertNil(extractedAmount("전화번호 02-1234-5678"))
+        XCTAssertNil(extractedAmount("2026-08-22 14:18:02"))
+        XCTAssertEqual(
+            extractedAmount("카드번호 1234-5678-9012-3456\n승인금액 15,100원"),
+            15_100
+        )
+    }
+
+    func testReceiptAmountPriorityFollowsChargedAmountLabels() {
+        XCTAssertEqual(
+            extractedAmount("합계 70,000원\n총 결제금액 60,000원\n받을금액 50,000원\n결제금액 40,000원\n실결제금액 30,000원\n승인금액 20,000원"),
+            20_000
+        )
+        XCTAssertEqual(
+            extractedAmount("총 결제금액 60,000원\n받을금액 50,000원"),
+            50_000,
+            "받을금액 must outrank 총 결제금액"
+        )
+    }
+
+    func testAmountIsAbsentRatherThanGuessedWhenNothingIsCredible() {
+        XCTAssertNil(extractedAmount("중부식자재마트\n영수증\n감사합니다"))
+        XCTAssertNil(extractedAmount(""))
+        XCTAssertNil(extractedAmount("주문번호 20260822001"))
+    }
+
+    func testManualEditsSurviveReextractionButAutomaticValuesAreCorrected() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        let automatic = MediaItem(kind: .photo, source: .camera, localPath: "Media/auto.jpg")
+        automatic.templatePurpose = .receipt
+        automatic.recognizedText = "승인번호 822608619 승인금액 15,100원"
+        automatic.receiptAmount = "822608619"
+        context.insert(automatic)
+
+        let corrected = MediaItem(kind: .photo, source: .camera, localPath: "Media/manual.jpg")
+        corrected.templatePurpose = .receipt
+        corrected.recognizedText = "승인번호 822608619 승인금액 15,100원"
+        corrected.receiptAmount = "99,000"
+        corrected.receiptAmountManuallyEdited = true
+        context.insert(corrected)
+
+        let changed = ReceiptAmountMigration.run(in: context)
+
+        XCTAssertEqual(changed, 1)
+        XCTAssertEqual(ReceiptSummaryService.amount(from: automatic.receiptAmount)?.value, 15_100)
+        XCTAssertEqual(corrected.receiptAmount, "99,000", "a hand-corrected amount must never be overwritten")
+
+        // Second run is a no-op: the version stamp makes the migration idempotent.
+        XCTAssertEqual(ReceiptAmountMigration.run(in: context), 0)
+    }
+
+    func testMigrationRepairsReceiptsFiledByAnEarlierExtractorGeneration() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let item = MediaItem(kind: .photo, source: .camera, localPath: "Media/clipped.jpg")
+        item.templatePurpose = .receipt
+        item.recognizedText = jungbuRecognizedText
+        item.receiptAmount = "15"
+        // Stamped by the generation that produced the wrong value.
+        item.receiptExtractionVersion = 2
+        context.insert(item)
+
+        XCTAssertEqual(ReceiptAmountMigration.run(in: context), 1)
+        XCTAssertEqual(
+            ReceiptSummaryService.amount(from: item.receiptAmount, locale: Locale(identifier: "ko_KR"))?.value,
+            15_100
+        )
+        XCTAssertEqual(item.receiptExtractionVersion, ReceiptInfoWriter.extractionVersion)
+    }
+
+    func testTheFifteenThousandOneHundredReceiptEndToEnd() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let item = MediaItem(kind: .photo, source: .camera, localPath: "Media/jungbu.jpg")
+        item.templatePurpose = .receipt
+        item.recognizedText = """
+        중부식자재마트
+        사업자등록번호 123-45-67890
+        2026-08-22 14:18:02
+        카드번호 1234-****-****-5678
+        승인번호 822608619
+        승인금액 15,100원
+        """
+        context.insert(item)
+
+        ReceiptAmountMigration.run(in: context)
+        let parsed = ReceiptSummaryService.amount(from: item.receiptAmount, locale: Locale(identifier: "ko_KR"))
+
+        XCTAssertEqual(parsed?.value, 15_100)
+        XCTAssertEqual(parsed?.currencyCode, "KRW")
+        XCTAssertEqual(
+            parsed?.formatted(locale: Locale(identifier: "ko_KR")),
+            "₩15,100",
+            "the list, the detail and the report all render this one string"
+        )
+    }
+
+    // MARK: - Receipt template
+
+    private func makeReceipt(
+        _ context: ModelContext,
+        merchant: String,
+        amount: String,
+        date: Date,
+        pinned: Bool = false
+    ) -> MediaItem {
+        let item = MediaItem(
+            kind: .photo, source: .camera,
+            localPath: "Media/receipt-\(UUID().uuidString).jpg",
+            createdAt: date
+        )
+        item.templatePurpose = .receipt
+        item.receiptMerchant = merchant
+        item.receiptAmount = amount
+        item.receiptDate = date
+        item.isPinned = pinned
+        context.insert(item)
+        return item
+    }
+
+    func testReceiptCase3AmountsAreParsedAndTotalled() {
+        let locale = Locale(identifier: "ko_KR")
+        XCTAssertEqual(ReceiptSummaryService.amount(from: "₩8,500", locale: locale)?.value, 8500)
+        XCTAssertEqual(ReceiptSummaryService.amount(from: "12,000원", locale: locale)?.value, 12000)
+        // Written as integer arithmetic: a `1234.56` Decimal literal is built from a
+        // Double and is not exactly 1234.56, which is the very thing being asserted.
+        XCTAssertEqual(
+            ReceiptSummaryService.amount(from: "TOTAL $12.34", locale: locale)?.value,
+            Decimal(1234) / 100
+        )
+        XCTAssertEqual(
+            ReceiptSummaryService.amount(from: "1.234,56 EUR", locale: locale)?.value,
+            Decimal(123_456) / 100
+        )
+        // A bare number takes the locale's currency rather than being discarded.
+        XCTAssertEqual(ReceiptSummaryService.amount(from: "8500", locale: locale)?.currencyCode, "KRW")
+    }
+
+    func testReceiptCase4UnreadableAmountIsCountedButNeverSummed() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let now = Date()
+        _ = makeReceipt(context, merchant: "CU", amount: "₩8,500", date: now)
+        _ = makeReceipt(context, merchant: "이마트", amount: "₩12,000", date: now)
+        _ = makeReceipt(context, merchant: "", amount: "", date: now)
+
+        let items = try context.fetch(FetchDescriptor<MediaItem>())
+        let summary = ReceiptSummaryService.summary(for: items, locale: Locale(identifier: "ko_KR"))
+
+        XCTAssertEqual(summary.count, 3)
+        XCTAssertEqual(summary.unreadableAmountCount, 1)
+        XCTAssertEqual(summary.totals.count, 1)
+        XCTAssertEqual(summary.totals.first?.value, 20500)
+        XCTAssertFalse(summary.hasMixedCurrencies)
+    }
+
+    func testReceiptMixedCurrenciesAreNeverCollapsedIntoOneTotal() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let now = Date()
+        _ = makeReceipt(context, merchant: "CU", amount: "₩8,500", date: now)
+        _ = makeReceipt(context, merchant: "Blue Bottle", amount: "$12.00", date: now)
+
+        let items = try context.fetch(FetchDescriptor<MediaItem>())
+        let summary = ReceiptSummaryService.summary(for: items, locale: Locale(identifier: "ko_KR"))
+
+        XCTAssertTrue(summary.hasMixedCurrencies)
+        XCTAssertEqual(summary.totals.count, 2)
+        XCTAssertEqual(summary.totals.first { $0.currencyCode == "KRW" }?.value, 8500)
+        XCTAssertEqual(summary.totals.first { $0.currencyCode == "USD" }?.value, 12)
+    }
+
+    func testReceiptCase5EditingRefreshesRowValuesAndSummary() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let now = Date()
+        let item = makeReceipt(context, merchant: "스타박스", amount: "", date: now)
+
+        var summary = ReceiptSummaryService.summary(for: [item], locale: Locale(identifier: "ko_KR"))
+        XCTAssertEqual(summary.unreadableAmountCount, 1)
+        XCTAssertTrue(summary.totals.isEmpty)
+
+        item.receiptMerchant = "스타벅스"
+        item.receiptAmount = "₩6,100"
+        try context.save()
+
+        summary = ReceiptSummaryService.summary(for: [item], locale: Locale(identifier: "ko_KR"))
+        XCTAssertEqual(item.receiptMerchant, "스타벅스")
+        XCTAssertEqual(summary.unreadableAmountCount, 0)
+        XCTAssertEqual(summary.totals.first?.value, 6100)
+    }
+
+    func testReceiptCase6CompletionRemovesItFromTheTemplate() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let item = makeReceipt(context, merchant: "CU", amount: "₩8,500", date: Date())
+
+        await MediaLifecycleService.complete(item)
+        try context.save()
+
+        let visible = try context.fetch(FetchDescriptor<MediaItem>())
+            .filter { $0.deletedAt == nil && $0.templatePurpose == .receipt }
+        XCTAssertTrue(visible.isEmpty)
+        XCTAssertNotNil(item.deletedAt)
+
+        MediaLifecycleService.restore(item)
+        XCTAssertEqual(item.templatePurpose, .receipt)
+    }
+
+    func testReceiptCase7PinnedReceiptSurvivesExpirationSweep() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let item = makeReceipt(context, merchant: "보증서", amount: "₩0", date: Date(), pinned: true)
+        RetentionService.apply(.today, to: item)
+        item.expirationDate = Date(timeIntervalSinceNow: -86_400)
+
+        XCTAssertTrue(item.isPinned)
+        XCTAssertFalse(
+            RetentionService.shouldMoveToRecentlyDeleted(item),
+            "a pinned receipt must not be swept away automatically"
+        )
+    }
+
+    func testReceiptStaysOutOfUnclassifiedAndCreatesNoAlbum() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let item = makeReceipt(context, merchant: "CU", amount: "₩8,500", date: Date())
+
+        XCTAssertFalse(item.isUnclassified)
+        XCTAssertNil(item.albumID)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<Album>()).isEmpty)
+    }
+
+    func testReceiptDisplayDateFallsBackWhenOCRFoundNoDate() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let captured = Date(timeIntervalSince1970: 1_780_000_000)
+        let item = makeReceipt(context, merchant: "CU", amount: "₩8,500", date: captured)
+
+        item.receiptDate = nil
+        XCTAssertEqual(item.receiptDisplayDate, captured, "must fall back to the capture date")
+
+        let detected = Date(timeIntervalSince1970: 1_781_000_000)
+        item.detectedDates = [detected]
+        XCTAssertEqual(item.receiptDisplayDate, detected, "a date read from the image wins over capture")
+
+        let printed = Date(timeIntervalSince1970: 1_782_000_000)
+        item.receiptDate = printed
+        XCTAssertEqual(item.receiptDisplayDate, printed, "the printed receipt date wins over everything")
+    }
+
+    func testReceiptReportFreeTrialAllowsFifteenRenderedSessionsAndBlocksSixteenth() {
+        var policy = ReceiptReportTrialPolicy(used: 0)
+
+        for expectedRemaining in stride(from: 14, through: 0, by: -1) {
+            XCTAssertTrue(policy.canOpen(isPremium: false, hasReceiptData: true))
+            policy = policy.consumingIfEligible(isPremium: false, didRenderReport: true)
+            XCTAssertEqual(policy.remaining, expectedRemaining)
+        }
+
+        XCTAssertFalse(policy.canOpen(isPremium: false, hasReceiptData: true))
+        XCTAssertTrue(policy.canOpen(isPremium: true, hasReceiptData: true))
+    }
+
+    func testReceiptReportTrialDoesNotConsumeForEmptyDataPeriodOrPremium() {
+        let fresh = ReceiptReportTrialPolicy(used: 0)
+        XCTAssertTrue(fresh.canOpen(isPremium: false, hasReceiptData: false))
+        XCTAssertEqual(
+            fresh.consumingIfEligible(isPremium: false, didRenderReport: false),
+            fresh
+        )
+        XCTAssertEqual(
+            fresh.consumingIfEligible(isPremium: true, didRenderReport: true),
+            fresh
+        )
+    }
+
+    func testReceiptReportUsesApprovalAmountAndExcludesIdentifierFromTotal() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let valid = makeReceipt(
+            context,
+            merchant: "중부식자재마트",
+            amount: "15,100",
+            date: Date(timeIntervalSince1970: 1_787_184_000)
+        )
+        valid.recognizedText = "승인번호 822608619 승인금액 15,100원"
+        let invalid = makeReceipt(
+            context,
+            merchant: "금액 미확인",
+            amount: "822608619",
+            date: Date(timeIntervalSince1970: 1_787_184_000)
+        )
+
+        let report = ReceiptReportAnalyticsService.build(
+            items: [valid, invalid],
+            grouping: .day,
+            locale: Locale(identifier: "ko_KR")
+        )
+
+        XCTAssertEqual(ReceiptAmountExtractor.extract(from: valid.recognizedText)?.value, 15_100)
+        XCTAssertNil(ReceiptSummaryService.amount(for: invalid, locale: Locale(identifier: "ko_KR")))
+        XCTAssertEqual(report.currencyReports.first?.total, 15_100)
+        XCTAssertEqual(report.unreadableReceipts.map(\.id), [invalid.id])
+    }
+
+    func testReceiptReportMerchantAndBiggestDayAggregation() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let calendar = Calendar(identifier: .gregorian)
+        let firstDay = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 8, day: 3)))
+        let secondDay = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 8, day: 22)))
+        _ = makeReceipt(context, merchant: "CU", amount: "₩8,500", date: firstDay)
+        _ = makeReceipt(context, merchant: "  cu  ", amount: "₩6,500", date: secondDay)
+        _ = makeReceipt(context, merchant: "이마트", amount: "₩50,000", date: secondDay)
+
+        let items = try context.fetch(FetchDescriptor<MediaItem>())
+        let report = ReceiptReportAnalyticsService.build(
+            items: items,
+            grouping: .day,
+            calendar: calendar,
+            locale: Locale(identifier: "ko_KR")
+        )
+        let krw = try XCTUnwrap(report.currencyReports.first { $0.currencyCode == "KRW" })
+
+        XCTAssertEqual(krw.total, 65_000)
+        XCTAssertEqual(krw.frequentMerchants.first?.count, 2)
+        XCTAssertEqual(krw.frequentMerchants.first?.total, 15_000)
+        XCTAssertEqual(krw.spendingMerchants.first?.merchant, "이마트")
+        XCTAssertEqual(krw.biggestDay?.total, 56_500)
+        XCTAssertEqual(krw.biggestDay?.items.count, 2)
+    }
+
+    func testReceiptReportTwoReceiptCompactSummary() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let date = Date(timeIntervalSince1970: 1_787_184_000)
+        _ = makeReceipt(context, merchant: "중부식자재마트", amount: "₩100", date: date)
+        _ = makeReceipt(context, merchant: "DD", amount: "₩15,100", date: date)
+
+        let report = ReceiptReportAnalyticsService.build(
+            items: try context.fetch(FetchDescriptor<MediaItem>()),
+            grouping: .day,
+            locale: Locale(identifier: "ko_KR")
+        )
+        let krw = try XCTUnwrap(report.currencyReports.first { $0.currencyCode == "KRW" })
+
+        XCTAssertEqual(report.receiptCount, 2)
+        XCTAssertEqual(krw.total, 15_200)
+        XCTAssertEqual(krw.average, 7_600)
+        XCTAssertEqual(krw.maximum, 15_100)
+        XCTAssertEqual(krw.spendingMerchants.first?.merchant, "DD")
+        XCTAssertEqual(krw.frequentMerchants.first?.merchant, "DD")
+        XCTAssertEqual(krw.largestReceipts.map(\.amount.value), [15_100, 100])
+        XCTAssertEqual(krw.biggestDay?.total, 15_200)
+    }
+
+    func testReceiptReportTwentyReceiptDashboardSummary() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let calendar = Calendar(identifier: .gregorian)
+
+        for index in 0..<20 {
+            let date = try XCTUnwrap(calendar.date(from: DateComponents(
+                year: 2026,
+                month: 8,
+                day: (index % 10) + 1
+            )))
+            _ = makeReceipt(
+                context,
+                merchant: index < 12 ? "이마트" : "CU",
+                amount: "₩\((index + 1) * 1_000)",
+                date: date
+            )
+        }
+
+        let report = ReceiptReportAnalyticsService.build(
+            items: try context.fetch(FetchDescriptor<MediaItem>()),
+            grouping: .day,
+            calendar: calendar,
+            locale: Locale(identifier: "ko_KR")
+        )
+        let krw = try XCTUnwrap(report.currencyReports.first { $0.currencyCode == "KRW" })
+
+        XCTAssertEqual(report.receiptCount, 20)
+        XCTAssertEqual(krw.total, 210_000)
+        XCTAssertEqual(krw.average, 10_500)
+        XCTAssertEqual(krw.maximum, 20_000)
+        XCTAssertEqual(krw.chartPoints.count, 10)
+        XCTAssertEqual(krw.spendingMerchants.first?.merchant, "CU")
+        XCTAssertEqual(krw.frequentMerchants.first?.merchant, "이마트")
+        XCTAssertEqual(krw.largestReceipts.prefix(3).reduce(Decimal.zero) { $0 + $1.amount.value }, 57_000)
+        XCTAssertEqual(krw.biggestDay?.total, 30_000)
+    }
+
+    func testReceiptPeriodFilterBuckets() {
+        let calendar = Calendar.current
+        let now = try! XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 8, day: 15)))
+        let thisMonth = try! XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 8, day: 2)))
+        let lastMonth = try! XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 7, day: 30)))
+
+        XCTAssertTrue(ReceiptPeriod.thisMonth.contains(thisMonth, now: now))
+        XCTAssertFalse(ReceiptPeriod.thisMonth.contains(lastMonth, now: now))
+        XCTAssertTrue(ReceiptPeriod.lastMonth.contains(lastMonth, now: now))
+        XCTAssertFalse(ReceiptPeriod.lastMonth.contains(thisMonth, now: now))
+        XCTAssertTrue(ReceiptPeriod.all.contains(lastMonth, now: now))
+    }
+
     // MARK: - QR workflow
 
     func testQRWorkflowCase1URLShowsDomainAndOpens() {

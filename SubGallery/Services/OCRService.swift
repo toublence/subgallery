@@ -242,31 +242,7 @@ actor OCRService {
     }
 
     private func receiptAmount(in lines: [String]) -> String {
-        let preferred = lines.first { line in
-            let lowercased = line.lowercased()
-            return [
-                "합계", "결제", "총액", "total", "amount", "summe", "gesamt", "importe",
-                "合計", "总计", "總計", "الإجمالي", "المجموع"
-            ].contains(where: lowercased.contains)
-        }
-        let candidates = preferred.map { [$0] } ?? lines.filter {
-            let uppercased = $0.uppercased()
-            return ["₩", "￦", "$", "€", "£", "¥", "₹", "원"].contains(where: $0.contains)
-                || [
-                    "KRW", "USD", "EUR", "GBP", "JPY", "CNY", "RMB", "AED", "SAR",
-                    "CAD", "AUD", "CHF", "INR"
-                ].contains(where: uppercased.contains)
-        }
-        let pattern = #"(?:(?:₩|￦|\$|€|£|¥|₹|KRW|USD|EUR|GBP|JPY|CNY|RMB|AED|SAR|CAD|AUD|CHF|INR)\s*)?(?:\d{1,3}(?:[,.\s]\d{3})+|\d+)(?:[,.]\d{2})?\s*(?:원|KRW|USD|EUR|GBP|JPY|CNY|RMB|AED|SAR|CAD|AUD|CHF|INR)?"#
-        guard let expression = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return "" }
-        for line in candidates {
-            let range = NSRange(line.startIndex..<line.endIndex, in: line)
-            if let match = expression.firstMatch(in: line, range: range),
-               let matchRange = Range(match.range, in: line) {
-                return String(line[matchRange]).trimmingCharacters(in: .whitespaces)
-            }
-        }
-        return ""
+        ReceiptAmountExtractor.canonicalAmountString(from: lines.joined(separator: "\n"))
     }
 
     private func unique(_ values: [String]) -> [String] {
@@ -307,11 +283,7 @@ actor OCRService {
                 let isReceipt = item.purpose == .receipt
                     || item.suggestedPurpose == .receipt
                     || SmartClassificationService.isHighConfidenceReceipt(result, text: result.text)
-                if isReceipt {
-                    if item.receiptMerchant.isEmpty { item.receiptMerchant = result.receiptMerchant }
-                    if item.receiptAmount.isEmpty { item.receiptAmount = result.receiptAmount }
-                    if item.receiptDate == nil { item.receiptDate = result.dates.first }
-                }
+                if isReceipt { ReceiptInfoWriter.apply(result, to: item) }
                 if PremiumAccess.isActive {
                     item.premiumAnalysisVersion = PremiumBackfillService.currentVersion
                 }
@@ -321,6 +293,73 @@ actor OCRService {
             }
             try? context.save()
         }
+    }
+}
+
+/// One place that decides how receipt fields are written, so the OCR pass, the
+/// automatic classifier and the backfill cannot drift apart on the rules.
+@MainActor
+enum ReceiptInfoWriter {
+    /// Bump this whenever `ReceiptAmountExtractor` changes. Receipts stamped with an
+    /// older version are re-derived from their existing text on the next launch,
+    /// which is how a fix reaches receipts that were already filed wrongly.
+    /// 2: label-aware extraction. 3: reject OCR-clipped groups like `15,1`.
+    static let extractionVersion = 3
+
+    /// Automatic values are replaced outright rather than only filled when empty:
+    /// extraction is deterministic, so the newest run is by definition the best
+    /// answer available — including when that answer is "cannot tell", which must
+    /// clear a previously wrong amount instead of preserving it.
+    static func apply(_ result: MediaAnalysisResult, to item: MediaItem) {
+        if !item.receiptMerchantManuallyEdited, !result.receiptMerchant.isEmpty {
+            item.receiptMerchant = result.receiptMerchant
+        }
+        if !item.receiptAmountManuallyEdited {
+            item.receiptAmount = result.receiptAmount
+        }
+        if !item.receiptDateManuallyEdited, item.receiptDate == nil {
+            item.receiptDate = result.dates.first
+        }
+        item.receiptExtractionVersion = extractionVersion
+    }
+
+    /// Re-derives the amount from text that was already recognised, which is how
+    /// receipts captured by the previous extractor get corrected without paying for
+    /// another Vision pass.
+    @discardableResult
+    static func reextractAmount(for item: MediaItem) -> Bool {
+        guard !item.receiptAmountManuallyEdited else {
+            item.receiptExtractionVersion = extractionVersion
+            return false
+        }
+        let corrected = ReceiptAmountExtractor.canonicalAmountString(from: item.recognizedText)
+        let changed = corrected != item.receiptAmount
+        item.receiptAmount = corrected
+        item.receiptExtractionVersion = extractionVersion
+        return changed
+    }
+}
+
+/// Corrects receipts that were filed by an older, less careful amount extractor.
+/// Runs for everyone — reading your own receipt's total is not a paid feature — and
+/// re-uses the text already recognised, so it costs no Vision work.
+@MainActor
+enum ReceiptAmountMigration {
+    @discardableResult
+    static func run(in context: ModelContext) -> Int {
+        let items = (try? context.fetch(FetchDescriptor<MediaItem>())) ?? []
+        var corrected = 0
+        for item in items where item.receiptExtractionVersion < ReceiptInfoWriter.extractionVersion {
+            guard item.templatePurpose == .receipt, item.deletedAt == nil else { continue }
+            guard !item.recognizedText.isEmpty else {
+                // Nothing to re-read; stamp it so it is not revisited every launch.
+                item.receiptExtractionVersion = ReceiptInfoWriter.extractionVersion
+                continue
+            }
+            if ReceiptInfoWriter.reextractAmount(for: item) { corrected += 1 }
+        }
+        if corrected > 0 || !items.isEmpty { try? context.save() }
+        return corrected
     }
 }
 
@@ -371,11 +410,7 @@ enum PremiumBackfillService {
             let isReceipt = item.purpose == .receipt
                 || item.suggestedPurpose == .receipt
                 || SmartClassificationService.isHighConfidenceReceipt(result, text: result.text)
-            if isReceipt {
-                if item.receiptMerchant.isEmpty { item.receiptMerchant = result.receiptMerchant }
-                if item.receiptAmount.isEmpty { item.receiptAmount = result.receiptAmount }
-                if item.receiptDate == nil { item.receiptDate = result.dates.first }
-            }
+            if isReceipt { ReceiptInfoWriter.apply(result, to: item) }
             item.premiumAnalysisVersion = currentVersion
             summary.analyzedFromStoredText += 1
             await Task.yield()
@@ -580,7 +615,6 @@ enum SmartClassificationService {
         switch purpose {
         case .receipt: .thirtyDays
         case .temporary, .qr: .sevenDays
-        case .parking: .untilComplete
         default: .forever
         }
     }
@@ -663,11 +697,7 @@ enum SmartClassificationService {
         item.suggestedAlbumID = nil
         item.suggestedRetention = nil
         item.classificationStatus = .applied
-        if purpose == .receipt, let result {
-            if item.receiptMerchant.isEmpty { item.receiptMerchant = result.receiptMerchant }
-            if item.receiptAmount.isEmpty { item.receiptAmount = result.receiptAmount }
-            if item.receiptDate == nil { item.receiptDate = result.dates.first }
-        }
+        if purpose == .receipt, let result { ReceiptInfoWriter.apply(result, to: item) }
         try? context.save()
         undoSnapshots[item.id] = snapshot
 

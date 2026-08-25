@@ -4,7 +4,6 @@ import SwiftData
 import SwiftUI
 
 private enum RepresentativeMediaAction {
-    case findCar
     case shareAndComplete
     case copyAndComplete
     case openURL
@@ -194,11 +193,6 @@ struct MediaViewer: View {
 
     @ViewBuilder
     private func contentActions(for item: MediaItem) -> some View {
-        if item.purpose == .parking, item.latitude != nil, item.longitude != nil {
-            Button { findCar(item) } label: { Label(L10n.text("차 찾기"), systemImage: "car.fill") }
-            Button { finish(item) } label: { Label(L10n.text("찾았어요"), systemImage: "checkmark.circle.fill") }
-            Divider()
-        }
         if !item.recognizedText.isEmpty {
             Menu(L10n.text("텍스트")) {
                 Button { MediaActionService.copy(item.recognizedText) } label: { Label(L10n.text("텍스트 복사"), systemImage: "doc.on.doc") }
@@ -345,14 +339,12 @@ struct MediaViewer: View {
     private func representativeAction(for item: MediaItem) -> RepresentativeMediaAction {
         switch item.primaryAction {
         case .shareAndComplete: return .shareAndComplete
-        case .findCar where item.latitude != nil && item.longitude != nil: return .findCar
         case .copyAndComplete where purchases.isPremium && !item.recognizedText.isEmpty: return .copyAndComplete
         case .open where !item.detectedQRCodes.isEmpty: return .openQR
         case .open where purchases.isPremium && !item.detectedURLs.isEmpty: return .openURL
         case .addEvent where purchases.isPremium && !item.detectedDates.isEmpty: return .addEvent
         default: break
         }
-        if item.purpose == .parking, item.latitude != nil, item.longitude != nil { return .findCar }
         if item.purpose == .receipt { return .shareAndComplete }
         if !item.detectedQRCodes.isEmpty { return .openQR }
         guard purchases.isPremium else { return .shareAndComplete }
@@ -407,7 +399,6 @@ struct MediaViewer: View {
 
     private func representativeTitle(_ action: RepresentativeMediaAction) -> String {
         switch action {
-        case .findCar: L10n.text("차 찾기")
         case .shareAndComplete: L10n.text("공유하고 완료")
         case .copyAndComplete: L10n.text("복사하고 완료")
         case .openURL: L10n.text("Safari에서 열기")
@@ -419,7 +410,6 @@ struct MediaViewer: View {
 
     private func representativeSymbol(_ action: RepresentativeMediaAction) -> String {
         switch action {
-        case .findCar: "car.fill"
         case .shareAndComplete: "square.and.arrow.up"
         case .copyAndComplete: "doc.on.doc"
         case .openURL: "safari"
@@ -431,7 +421,6 @@ struct MediaViewer: View {
 
     private func perform(_ action: RepresentativeMediaAction, for item: MediaItem) {
         switch action {
-        case .findCar: findCar(item)
         case .shareAndComplete: prepareShare(for: item, completeAfter: true)
         case .copyAndComplete: copyAndFinish(item.recognizedText, item: item)
         case .openURL:
@@ -472,14 +461,6 @@ struct MediaViewer: View {
             try MediaActionService.openAddress(value)
             if completeAfter { finish(item) }
         } catch { actionMessage = error.localizedDescription }
-    }
-
-    private func findCar(_ item: MediaItem) {
-        guard let latitude = item.latitude, let longitude = item.longitude else {
-            actionMessage = L10n.text("저장된 주차 위치가 없습니다.")
-            return
-        }
-        MediaActionService.openLocation(latitude: latitude, longitude: longitude, name: L10n.text("주차 위치"))
     }
 
     private func addCalendarEvent(_ date: Date, item: MediaItem, completeAfter: Bool) {
@@ -593,7 +574,9 @@ private struct ViewerPage: View {
     }
 }
 
-private struct ReceiptDetailsEditorView: View {
+/// Shared with the receipt template: OCR is fallible, so correcting it must be one
+/// tap from wherever the wrong value is shown.
+struct ReceiptDetailsEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     let item: MediaItem
@@ -633,9 +616,18 @@ private struct ReceiptDetailsEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L10n.text("저장")) {
-                        item.receiptMerchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
-                        item.receiptAmount = amount.trimmingCharacters(in: .whitespacesAndNewlines)
-                        item.receiptDate = includesDate ? date : nil
+                        let newMerchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let newAmount = amount.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let newDate = includesDate ? date : nil
+                        // Only fields the user actually changed become protected, so
+                        // opening the editor and cancelling out does not freeze values
+                        // that automatic extraction could still improve.
+                        if newMerchant != item.receiptMerchant { item.receiptMerchantManuallyEdited = true }
+                        if newAmount != item.receiptAmount { item.receiptAmountManuallyEdited = true }
+                        if newDate != item.receiptDate { item.receiptDateManuallyEdited = true }
+                        item.receiptMerchant = newMerchant
+                        item.receiptAmount = newAmount
+                        item.receiptDate = newDate
                         try? modelContext.save()
                         dismiss()
                     }

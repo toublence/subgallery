@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UIKit
 
 /// Runs a parsed QR's action and reports failures, so the row and the detail
 /// screen share one implementation instead of each re-deriving what to do.
@@ -58,9 +59,20 @@ extension MediaItem {
     var primaryQRContent: QRContentInfo? { qrContents.first }
 }
 
-// MARK: - List row
+enum TemplateGridLayout {
+    /// QR and receipt template albums use three columns on iPad and two on iPhone.
+    static var columns: [GridItem] {
+        let count = UIDevice.current.userInterfaceIdiom == .pad ? 3 : 2
+        return Array(
+            repeating: GridItem(.flexible(), spacing: 12),
+            count: count
+        )
+    }
+}
 
-struct QRInfoRow: View {
+// MARK: - Grid card
+
+struct QRInfoCard: View {
     let item: MediaItem
     let isSelecting: Bool
     let isSelected: Bool
@@ -70,91 +82,87 @@ struct QRInfoRow: View {
     private var info: QRContentInfo? { item.primaryQRContent }
 
     var body: some View {
-        Button(action: open) {
-            HStack(spacing: 12) {
-                thumbnail
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Image(systemName: (info?.type ?? .unknown).symbol)
-                            .font(.caption2)
-                            .foregroundStyle(Color.accentColor)
-                        Text((info?.type ?? .unknown).title)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(Color.accentColor)
-                        if item.detectedQRCodes.count > 1 {
-                            Text(L10n.format("QR %d개", item.detectedQRCodes.count))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: 4)
-                        usageBadge
-                    }
-                    Text(info?.title ?? L10n.text("QR 코드"))
-                        .font(.headline)
-                        .foregroundStyle(item.isQRUsed ? .secondary : .primary)
-                        .lineLimit(1)
-                    if let subtitle = info?.subtitle, !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    Text(L10n.date(item.createdAt))
+        HStack(alignment: .top, spacing: 10) {
+            thumbnail
+            VStack(alignment: .leading, spacing: 3) {
+                header
+                Text(info?.title ?? L10n.text("QR 코드"))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(item.isQRUsed ? .secondary : .primary)
+                    .lineLimit(1)
+                if let subtitle = info?.subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
                         .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                Spacer(minLength: 8)
-                trailing
+                Text(L10n.date(item.createdAt, dateStyle: .abbreviated, timeStyle: .omitted))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                if let info, !isSelecting { actionButton(info) }
             }
-            .padding(10)
-            .background(
-                Color(uiColor: .secondarySystemGroupedBackground),
-                in: RoundedRectangle(cornerRadius: 14)
-            )
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
-    }
-
-    private var usageBadge: some View {
-        Label(
-            L10n.text(item.isQRUsed ? "확인함" : "미확인"),
-            systemImage: item.isQRUsed ? "checkmark.circle.fill" : "circle.dotted"
-        )
-        .labelStyle(.titleAndIcon)
-        .font(.caption2.weight(.semibold))
-        .foregroundStyle(item.isQRUsed ? Color.secondary : Color.orange)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 112, alignment: .leading)
         .background(
-            (item.isQRUsed ? Color.secondary : Color.orange).opacity(0.12),
-            in: Capsule()
+            Color(uiColor: .secondarySystemGroupedBackground),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .onTapGesture(perform: open)
+        .accessibilityAddTraits(isSelecting && isSelected ? .isSelected : [])
+        .accessibilityAction { open() }
     }
 
     private var thumbnail: some View {
         MediaThumbnail(item: item)
-            .frame(width: 56, height: 56)
+            .frame(width: 72, height: 92)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipped()
+            .overlay(alignment: .topTrailing) {
+                if isSelecting {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.white)
+                        .shadow(radius: 2)
+                        .padding(6)
+                }
+            }
     }
 
-    @ViewBuilder
-    private var trailing: some View {
-        if isSelecting {
-            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-        } else if let info {
-            Button { runAction(info) } label: {
-                Label(info.primaryAction.title, systemImage: info.primaryAction.symbol)
-                    .font(.subheadline.weight(.semibold))
-                    .labelStyle(.titleOnly)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Color.accentColor.opacity(0.12), in: Capsule())
+    private var header: some View {
+        HStack(spacing: 4) {
+            Image(systemName: (info?.type ?? .unknown).symbol)
+                .font(.caption2)
+            Text((info?.type ?? .unknown).title)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+            if item.detectedQRCodes.count > 1 {
+                Text("· \(item.detectedQRCodes.count)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(info.primaryAction.title) · \(info.title)")
+            Spacer(minLength: 0)
+            Image(systemName: item.isQRUsed ? "checkmark.circle.fill" : "circle.dotted")
+                .font(.caption2)
+                .foregroundStyle(item.isQRUsed ? Color.secondary : Color.orange)
         }
+        .foregroundStyle(Color.accentColor)
+    }
+
+    private func actionButton(_ info: QRContentInfo) -> some View {
+        Button { runAction(info) } label: {
+            Text(info.primaryAction.title)
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .background(Color.accentColor.opacity(0.12), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 4)
+        .accessibilityLabel("\(info.primaryAction.title) · \(info.title)")
     }
 }
 

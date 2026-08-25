@@ -103,7 +103,6 @@ enum OCRStatus: String, Codable {
 enum CapturePurpose: String, Codable, CaseIterable, Identifiable {
     case general
     case receipt
-    case parking
     case document
     case qr
     case temporary
@@ -116,7 +115,6 @@ enum CapturePurpose: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .general: L10n.text("일반")
         case .receipt: L10n.text("영수증")
-        case .parking: L10n.text("주차")
         case .document: L10n.text("문서")
         case .qr: L10n.text("QR")
         case .temporary: L10n.text("임시 사진")
@@ -137,7 +135,6 @@ enum SmartClassificationStatus: String, Codable {
 enum PrimaryMediaAction: String, Codable, CaseIterable, Identifiable {
     case automatic
     case shareAndComplete
-    case findCar
     case copyAndComplete
     case open
     case addEvent
@@ -148,7 +145,6 @@ enum PrimaryMediaAction: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .automatic: L10n.text("자동 선택")
         case .shareAndComplete: L10n.text("공유하고 완료")
-        case .findCar: L10n.text("차 찾기")
         case .copyAndComplete: L10n.text("복사하고 완료")
         case .open: L10n.text("열기")
         case .addEvent: L10n.text("일정 추가")
@@ -213,6 +209,14 @@ final class MediaItem {
     /// When the user actually acted on this item's QR. `nil` means unopened.
     /// A date rather than a flag so the detail screen can say when it happened.
     var qrOpenedAt: Date?
+    /// Set when the user corrects a field by hand. Automatic extraction may improve
+    /// its own guesses freely, but it must never overwrite a human correction.
+    var receiptMerchantManuallyEdited: Bool = false
+    var receiptAmountManuallyEdited: Bool = false
+    var receiptDateManuallyEdited: Bool = false
+    /// Which generation of the amount extractor produced the stored value, so a
+    /// smarter extractor can re-derive old receipts without re-running OCR.
+    var receiptExtractionVersion: Int = 0
 
     init(
         id: UUID = UUID(), kind: MediaKind, source: MediaSource,
@@ -279,7 +283,7 @@ final class MediaItem {
     var templatePurpose: CapturePurpose? {
         get {
             switch purpose {
-            case .receipt, .parking, .document, .qr, .temporary, .travel:
+            case .receipt, .document, .qr, .temporary, .travel:
                 purpose
             case .general, .custom:
                 nil
@@ -289,6 +293,9 @@ final class MediaItem {
     }
     var isUnclassified: Bool { albumID == nil && templatePurpose == nil }
     var isQRUsed: Bool { qrOpenedAt != nil }
+    /// Receipts never show an empty date: the printed date wins, then a date read
+    /// out of the image, then when the photo itself was taken.
+    var receiptDisplayDate: Date { receiptDate ?? detectedDates.first ?? createdAt }
     var primaryAction: PrimaryMediaAction {
         get { PrimaryMediaAction(rawValue: primaryActionRaw) ?? .automatic }
         set { primaryActionRaw = newValue.rawValue }

@@ -349,6 +349,9 @@ struct SubGalleryApp: App {
                         await reconcileCloudMediaAssets()
                     }
                     CapturePresetService.seedBuiltIns(in: dataStore.container.mainContext)
+                    // Free of charge and independent of the premium backfill: a
+                    // receipt showing the wrong total is a defect, not a locked feature.
+                    ReceiptAmountMigration.run(in: dataStore.container.mainContext)
                     if PurchaseManager.shared.isPremium {
                         await PremiumBackfillService.run(in: dataStore.container.mainContext)
                     }
@@ -502,11 +505,10 @@ struct SubGalleryApp: App {
             (names[1], .systemGreen, .systemTeal, .travel, .camera, .forever, false),
             (names[2], .systemOrange, .systemPink, .travel, .camera, .forever, false),
             (names[3], .systemBrown, .systemOrange, .receipt, .camera, .thirtyDays, false),
-            (names[4], .systemIndigo, .systemBlue, .parking, .camera, .untilComplete, true),
-            (names[5], .systemPurple, .systemIndigo, .document, .files, .untilComplete, false),
-            (names[6], .systemGray, .systemPurple, .document, .photos, .today, false),
-            (names[7], .systemMint, .systemGreen, .travel, .camera, .forever, false),
-            (names[8], .systemPink, .systemPurple, .document, .photos, .sevenDays, false)
+            (names[4], .systemPurple, .systemIndigo, .document, .files, .untilComplete, false),
+            (names[5], .systemGray, .systemPurple, .document, .photos, .today, false),
+            (names[6], .systemMint, .systemGreen, .travel, .camera, .forever, false),
+            (names[7], .systemPink, .systemPurple, .document, .photos, .sevenDays, false)
         ]
 
         for (index, fixture) in fixtures.enumerated() {
@@ -541,23 +543,23 @@ struct SubGalleryApp: App {
     private func localizedStoreFixtureNames() -> [String] {
         switch AppLanguage.selected.resolvedIdentifier {
         case "de":
-            ["Berlin Reise", "Berlin Mitte", "Berlin Abend", "Café-Beleg", "Parkplatz B3", "Konferenzinfo", "Büronotiz", "Wochenendspaziergang", "Konzertinfo"]
+            ["Berlin Reise", "Berlin Mitte", "Berlin Abend", "Café-Beleg", "Konferenzinfo", "Büronotiz", "Wochenendspaziergang", "Konzertinfo"]
         case "es":
-            ["Viaje a Madrid", "Madrid Centro", "Atardecer en Madrid", "Recibo de cafetería", "Aparcamiento B3", "Guía de conferencia", "Nota de oficina", "Paseo del fin de semana", "Entrada de concierto"]
+            ["Viaje a Madrid", "Madrid Centro", "Atardecer en Madrid", "Recibo de cafetería", "Guía de conferencia", "Nota de oficina", "Paseo del fin de semana", "Entrada de concierto"]
         case "fr":
-            ["Voyage à Paris", "Paris Centre", "Soirée à Paris", "Reçu du café", "Parking B3", "Guide de conférence", "Note de bureau", "Promenade du week-end", "Billet de concert"]
+            ["Voyage à Paris", "Paris Centre", "Soirée à Paris", "Reçu du café", "Guide de conférence", "Note de bureau", "Promenade du week-end", "Billet de concert"]
         case "ja":
-            ["東京旅行", "東京駅", "東京の夕景", "カフェのレシート", "駐車場 B3", "会議案内", "仕事メモ", "週末の散歩", "コンサート案内"]
+            ["東京旅行", "東京駅", "東京の夕景", "カフェのレシート", "会議案内", "仕事メモ", "週末の散歩", "コンサート案内"]
         case "zh-Hans":
-            ["上海旅行", "上海市中心", "上海夜景", "咖啡店收据", "停车位 B3", "会议指南", "工作备忘", "周末散步", "演出门票"]
+            ["上海旅行", "上海市中心", "上海夜景", "咖啡店收据", "会议指南", "工作备忘", "周末散步", "演出门票"]
         case "zh-Hant":
-            ["台北旅行", "台北車站", "台北夜景", "咖啡店收據", "停車位 B3", "會議指南", "工作備忘", "週末散步", "演唱會門票"]
+            ["台北旅行", "台北車站", "台北夜景", "咖啡店收據", "會議指南", "工作備忘", "週末散步", "演唱會門票"]
         case "ar":
-            ["رحلة دبي", "وسط دبي", "مساء دبي", "إيصال المقهى", "موقف B3", "دليل المؤتمر", "ملاحظة العمل", "نزهة نهاية الأسبوع", "تذكرة الحفل"]
+            ["رحلة دبي", "وسط دبي", "مساء دبي", "إيصال المقهى", "دليل المؤتمر", "ملاحظة العمل", "نزهة نهاية الأسبوع", "تذكرة الحفل"]
         case "ko":
-            ["제주 바다", "제주 한라산", "제주 노을", "카페 영수증", "주차 위치", "회의 안내", "업무 메모", "주말 산책", "공연 안내"]
+            ["제주 바다", "제주 한라산", "제주 노을", "카페 영수증", "회의 안내", "업무 메모", "주말 산책", "공연 안내"]
         default:
-            ["Seattle Trip", "Downtown Seattle", "Seattle Sunset", "Coffee Receipt", "Parking B3", "Conference Guide", "Office Note", "Weekend Walk", "Concert Ticket"]
+            ["Seattle Trip", "Downtown Seattle", "Seattle Sunset", "Coffee Receipt", "Conference Guide", "Office Note", "Weekend Walk", "Concert Ticket"]
         }
     }
 
@@ -585,7 +587,7 @@ struct SubGalleryApp: App {
                 let y = CGFloat((index * 251 + offset * 173) % 1200) - 120
                 context.fillEllipse(in: CGRect(x: x, y: y, width: diameter, height: diameter))
             }
-            let symbolNames = ["airplane", "mountain.2.fill", "sun.horizon.fill", "receipt.fill", "car.fill", "doc.text.fill"]
+            let symbolNames = ["airplane", "mountain.2.fill", "sun.horizon.fill", "receipt.fill", "doc.text.fill"]
             let symbol = UIImage(systemName: symbolNames[index % symbolNames.count])?
                 .withTintColor(.white.withAlphaComponent(0.9), renderingMode: .alwaysOriginal)
             symbol?.draw(in: CGRect(x: 430, y: 470, width: 340, height: 340))

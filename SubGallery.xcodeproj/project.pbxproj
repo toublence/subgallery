@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		00DED6DE466B339AAA463A1E /* ReminderFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B68C1E5FC9C4C887734FB62 /* ReminderFlowUITests.swift */; };
+		115467E25549FBC81FA5FF07 /* ReceiptAmountExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AE923873437240BB258C530 /* ReceiptAmountExtractor.swift */; };
 		11B00E2B1EB9D0E3F884B0ED /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F33C5AE813196FAAA5B9CAC5 /* LibraryView.swift */; };
 		225D0FB1F75165A16C407B8B /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = D074F98E47DED466A20E2D5A /* Localization.swift */; };
 		2304F1AC8CB486B6B57ACAF1 /* QRTemplateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F03D8D421BC8362167754AE /* QRTemplateView.swift */; };
@@ -17,9 +18,12 @@
 		39ECD60577F267B40BE40536 /* RetentionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C11E7C2B32572F1741D84C /* RetentionService.swift */; };
 		3E57BD355CA4963B21F233E7 /* AlbumView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 184CA5849600E1B32CD7E54A /* AlbumView.swift */; };
 		404B0EC6029434DB874EC510 /* ReminderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E6A5E7050A65C1316E1469 /* ReminderService.swift */; };
+		4501387BCA4E6C225D6E532B /* ReceiptTemplateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0419DE9C25D08523D83F6095 /* ReceiptTemplateView.swift */; };
 		485DE72CB54A3204951731EE /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = F163423CB6412109ABE85076 /* FirebaseAnalytics */; };
+		4D18F8B8D0252970BB4C66D6 /* ReceiptSummaryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93EF563772AD6AD8F4B5C690 /* ReceiptSummaryService.swift */; };
 		543252B1147C4073FF3A130F /* MediaViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13740F818CCA77DA7509BB84 /* MediaViewer.swift */; };
 		5A4561F8BD35C6D0DD712462 /* VideoEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16F6DACD4AEA969F5B1D8D9B /* VideoEditorView.swift */; };
+		5B27954CCC27B3BA4A444D35 /* ReceiptReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B54DFF725C8A0CF058BFA9D1 /* ReceiptReportView.swift */; };
 		63BF05839FBB14495AAFACCE /* MediaExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 416F99E31F93A8560B2DFDE7 /* MediaExportService.swift */; };
 		73DEF7968DBBE9DEAEF1B0C5 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4EC6A0C3C613175E96A00D5 /* OnboardingView.swift */; };
 		818844E16F3DC3A2683A79D5 /* OCRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21BFAC06B4C31AEE4A0BC851 /* OCRService.swift */; };
@@ -58,6 +62,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0419DE9C25D08523D83F6095 /* ReceiptTemplateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiptTemplateView.swift; sourceTree = "<group>"; };
 		0580F6773753EDD670BE2E3E /* fr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = fr; path = fr.lproj/Localizable.strings; sourceTree = "<group>"; };
 		0AF37C9DD02377C74B01812D /* MediaMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaMapView.swift; sourceTree = "<group>"; };
 		0B4EA127F1CE16F4388BA504 /* SubGalleryApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubGalleryApp.swift; sourceTree = "<group>"; };
@@ -72,6 +77,7 @@
 		36E6E6F7C1D3EBA74DE5F9AB /* ar */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ar; path = ar.lproj/Localizable.strings; sourceTree = "<group>"; };
 		416F99E31F93A8560B2DFDE7 /* MediaExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaExportService.swift; sourceTree = "<group>"; };
 		439581D25342B6D4613AE9B1 /* QRContentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRContentService.swift; sourceTree = "<group>"; };
+		4AE923873437240BB258C530 /* ReceiptAmountExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiptAmountExtractor.swift; sourceTree = "<group>"; };
 		5189CFE3AFEAD981E774B475 /* SubGalleryTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = SubGalleryTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		52F65A59E7F0EE7A210D8CDD /* de */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = de; path = de.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		55E9BDD28E4D394F81674C9E /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/Localizable.strings; sourceTree = "<group>"; };
@@ -89,12 +95,14 @@
 		7FEA900CF93C9DFE541DEFD6 /* CameraController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraController.swift; sourceTree = "<group>"; };
 		82729B7FDA67B48AEC77D7E7 /* ko */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ko; path = ko.lproj/Localizable.strings; sourceTree = "<group>"; };
 		8DF3C1FCD81591C34F6D49FB /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		93EF563772AD6AD8F4B5C690 /* ReceiptSummaryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiptSummaryService.swift; sourceTree = "<group>"; };
 		99517D95B52D045834DCD327 /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
 		A02E7CEB1CFA103FBCBA51F1 /* MediaActionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaActionService.swift; sourceTree = "<group>"; };
 		A5E6A5E7050A65C1316E1469 /* ReminderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderService.swift; sourceTree = "<group>"; };
 		A61D1381EDDC141B87A96112 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AD0EE35CB4D7D4A57C1998F9 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		AF91B3A5BE1ABB4764713D9A /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		B54DFF725C8A0CF058BFA9D1 /* ReceiptReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiptReportView.swift; sourceTree = "<group>"; };
 		CA6E398F9224AC2E5412A192 /* PhotoEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEditorView.swift; sourceTree = "<group>"; };
 		CE1D30AFD5D1C9954ED41EB0 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		D074F98E47DED466A20E2D5A /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
@@ -204,6 +212,8 @@
 				CA6E398F9224AC2E5412A192 /* PhotoEditorView.swift */,
 				6E2806722EB9767CD5B284A3 /* PremiumView.swift */,
 				7F03D8D421BC8362167754AE /* QRTemplateView.swift */,
+				B54DFF725C8A0CF058BFA9D1 /* ReceiptReportView.swift */,
+				0419DE9C25D08523D83F6095 /* ReceiptTemplateView.swift */,
 				7D60794DA81FEC4D11908878 /* SettingsView.swift */,
 				16F6DACD4AEA969F5B1D8D9B /* VideoEditorView.swift */,
 			);
@@ -221,6 +231,8 @@
 				D38749B796DA97D3C928B151 /* MediaStorage.swift */,
 				21BFAC06B4C31AEE4A0BC851 /* OCRService.swift */,
 				439581D25342B6D4613AE9B1 /* QRContentService.swift */,
+				4AE923873437240BB258C530 /* ReceiptAmountExtractor.swift */,
+				93EF563772AD6AD8F4B5C690 /* ReceiptSummaryService.swift */,
 				A5E6A5E7050A65C1316E1469 /* ReminderService.swift */,
 				E2C11E7C2B32572F1741D84C /* RetentionService.swift */,
 				FD4F8B8C9DE9B6552B21FB91 /* SharedInboxService.swift */,
@@ -396,6 +408,10 @@
 				8AEF63A919788C841874AC8B /* PremiumView.swift in Sources */,
 				D8DE28A187ED071D8B915421 /* QRContentService.swift in Sources */,
 				2304F1AC8CB486B6B57ACAF1 /* QRTemplateView.swift in Sources */,
+				115467E25549FBC81FA5FF07 /* ReceiptAmountExtractor.swift in Sources */,
+				5B27954CCC27B3BA4A444D35 /* ReceiptReportView.swift in Sources */,
+				4D18F8B8D0252970BB4C66D6 /* ReceiptSummaryService.swift in Sources */,
+				4501387BCA4E6C225D6E532B /* ReceiptTemplateView.swift in Sources */,
 				404B0EC6029434DB874EC510 /* ReminderService.swift in Sources */,
 				39ECD60577F267B40BE40536 /* RetentionService.swift in Sources */,
 				2404E3D5AABB1D9D5B7D138F /* SettingsView.swift in Sources */,
