@@ -47,9 +47,11 @@ struct ReceiptTemplateView: View {
     @Query(sort: \MediaItem.createdAt, order: .reverse) private var allMedia: [MediaItem]
     @StateObject private var purchases = PurchaseManager.shared
     @Binding var isCameraPresented: Bool
+    @Binding var captureContext: CaptureContext
 
     @AppStorage("receipt.sort") private var sortRaw = ReceiptSort.newest.rawValue
     @AppStorage("receipt.pinnedOnly") private var showsPinnedOnly = false
+    @AppStorage("privacy.stripMetadata") private var stripsMetadata = false
 
     @State private var searchText = ""
     @State private var detailItem: MediaItem?
@@ -58,8 +60,17 @@ struct ReceiptTemplateView: View {
     @State private var showsPremium = false
     @State private var showsReport = false
     @State private var message: String?
+    @State private var isSelecting = false
+    @State private var selection = Set<UUID>()
+    @State private var showsRetentionSheet = false
+    @State private var showsShareSheet = false
+    @State private var showsFilesExporter = false
+    @State private var preparedExportURLs: [URL] = []
+    @State private var deleteConfirmation = false
 
     private var sort: ReceiptSort { ReceiptSort(rawValue: sortRaw) ?? .newest }
+
+    private var selectedItems: [MediaItem] { items.filter { selection.contains($0.id) } }
 
     private var allReceipts: [MediaItem] {
         allMedia.filter { $0.deletedAt == nil && $0.templatePurpose == .receipt }
@@ -77,34 +88,7 @@ struct ReceiptTemplateView: View {
     var body: some View {
         ScrollView {
             LazyVGrid(columns: TemplateGridLayout.columns, spacing: 12) {
-                ForEach(items) { item in
-                    ReceiptRow(item: item)
-                        .padding(10)
-                        .background(
-                            Color(uiColor: .secondarySystemGroupedBackground),
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        )
-                    .contentShape(Rectangle())
-                    .onTapGesture { detailItem = item }
-                    .swipeActions(edge: .leading) {
-                        Button {
-                            item.isPinned.toggle()
-                            try? modelContext.save()
-                        } label: {
-                            Label(
-                                L10n.text(item.isPinned ? "고정 해제" : "고정"),
-                                systemImage: item.isPinned ? "pin.slash" : "pin"
-                            )
-                        }
-                        .tint(.orange)
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button { complete(item) } label: {
-                            Label(L10n.text("완료"), systemImage: "checkmark.circle")
-                        }
-                        .tint(.green)
-                    }
-                }
+                ForEach(items) { item in receiptCell(item) }
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -117,13 +101,48 @@ struct ReceiptTemplateView: View {
         )
         .navigationTitle(CapturePurpose.receipt.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { openReport() } label: {
-                    Label(L10n.text("지출 리포트"), systemImage: "chart.bar.xaxis")
+        .safeAreaInset(edge: .bottom) {
+            if !isSelecting {
+                CaptureInputControls(
+                    selection: $photosSelection,
+                    allowsVideos: false,
+                    captureTitle: L10n.text("영수증 촬영"),
+                    captureSymbol: "camera.fill",
+                    captureAccessibilityLabel: L10n.text("영수증 촬영")
+                ) {
+                    captureContext = .template(.receipt)
+                    isCameraPresented = true
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) { optionsMenu }
+        }
+        .toolbar {
+            if isSelecting {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(L10n.text(selection.count == items.count ? "전체 선택 해제" : "전체 선택")) {
+                        if selection.count == items.count {
+                            selection.removeAll()
+                        } else {
+                            selection = Set(items.map(\.id))
+                        }
+                    }
+                }
+            }
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if !isSelecting {
+                    Button { openReport() } label: {
+                        Label(L10n.text("지출 리포트"), systemImage: "chart.bar.xaxis")
+                    }
+                    optionsMenu
+                }
+                Button(L10n.text(isSelecting ? "완료" : "선택")) {
+                    isSelecting.toggle()
+                    if !isSelecting { selection.removeAll() }
+                }
+                .disabled(items.isEmpty)
+            }
+            if isSelecting {
+                ToolbarItemGroup(placement: .bottomBar) { batchActions }
+            }
         }
         .overlay { if allReceipts.isEmpty { emptyState } else if items.isEmpty { noResults } }
         .sheet(item: $detailItem) { item in
@@ -145,6 +164,31 @@ struct ReceiptTemplateView: View {
                 showsReport = true
             }
         }
+        .sheet(isPresented: $showsRetentionSheet) {
+            BatchRetentionPickerView(items: selectedItems) {
+                endSelection()
+                showsRetentionSheet = false
+            }
+        }
+        .sheet(isPresented: $showsShareSheet, onDismiss: cleanupPreparedExport) {
+            ActivityShareSheet(urls: preparedExportURLs)
+        }
+        .sheet(isPresented: $showsFilesExporter, onDismiss: cleanupPreparedExport) {
+            FilesExportPicker(urls: preparedExportURLs)
+        }
+        .confirmationDialog(
+            L10n.text("선택한 사진을 최근 삭제로 이동할까요?"),
+            isPresented: $deleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.text("삭제"), role: .destructive) { deleteSelected() }
+            Button(L10n.text("취소"), role: .cancel) { }
+        }
+        .onChange(of: items.map(\.id)) { _, ids in
+            // Receipts leave this list when completed or deleted; drop them from the
+            // selection so a batch action cannot target something no longer shown.
+            selection.formIntersection(Set(ids))
+        }
         .onChange(of: photosSelection) { _, selection in importPhotos(selection) }
         .alert(L10n.text("사진 작업"), isPresented: Binding(
             get: { message != nil },
@@ -153,6 +197,160 @@ struct ReceiptTemplateView: View {
             Button(L10n.text("확인"), role: .cancel) { }
         } message: {
             Text(message ?? "")
+        }
+    }
+
+    private var batchActions: some View {
+        Menu {
+            Button { saveSelectedToPhotos() } label: {
+                Label(L10n.text("사진 앱에 저장"), systemImage: "photo.badge.arrow.down")
+            }
+            Button { prepareExport(selectedItems) { showsFilesExporter = true } } label: {
+                Label(L10n.text("파일 앱으로 내보내기"), systemImage: "folder")
+            }
+            Button { prepareExport(selectedItems) { showsShareSheet = true } } label: {
+                Label(L10n.text("공유"), systemImage: "square.and.arrow.up")
+            }
+            Divider()
+            Button { showsRetentionSheet = true } label: {
+                Label(L10n.text("보관 기간 변경"), systemImage: "clock")
+            }
+            Button { togglePinnedSelected() } label: {
+                let removesPins = selectedItems.allSatisfy(\.isPinned)
+                Label(
+                    L10n.text(removesPins ? "고정 해제" : "고정"),
+                    systemImage: removesPins ? "pin.slash" : "pin"
+                )
+            }
+            Button { completeSelected() } label: {
+                Label(L10n.text("완료 처리"), systemImage: "checkmark.circle")
+            }
+            Divider()
+            Button(role: .destructive) { deleteConfirmation = true } label: {
+                Label(L10n.text("삭제"), systemImage: "trash")
+            }
+        } label: {
+            Label(L10n.format("%d개 작업", selection.count), systemImage: "ellipsis.circle")
+        }
+        .disabled(selection.isEmpty)
+    }
+
+    // MARK: - Selection
+
+    private func toggle(_ id: UUID) {
+        if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
+    }
+
+    private func endSelection() {
+        selection.removeAll()
+        isSelecting = false
+    }
+
+    private func togglePinnedSelected() {
+        let changing = selectedItems
+        let shouldPin = !changing.allSatisfy(\.isPinned)
+        changing.forEach { $0.isPinned = shouldPin }
+        Task {
+            // Unpinning can make an already-expired receipt due for cleanup, which
+            // the pin was the only thing holding back.
+            if !shouldPin {
+                for item in changing where RetentionService.shouldMoveToRecentlyDeleted(item) {
+                    await MediaLifecycleService.moveToRecentlyDeleted(item)
+                }
+            }
+            try? modelContext.save()
+            endSelection()
+        }
+    }
+
+    private func completeSelected() {
+        let completing = selectedItems
+        Task {
+            for item in completing { await MediaLifecycleService.complete(item) }
+            try? modelContext.save()
+            endSelection()
+        }
+    }
+
+    private func deleteSelected() {
+        let deleting = selectedItems
+        Task {
+            for item in deleting { await MediaLifecycleService.moveToRecentlyDeleted(item) }
+            try? modelContext.save()
+            endSelection()
+        }
+    }
+
+    private func saveSelectedToPhotos() {
+        let exporting = selectedItems
+        Task {
+            do {
+                try await MediaExportService.saveToPhotos(exporting)
+                message = L10n.format("%d개 항목을 Photos에 저장했습니다.", exporting.count)
+                endSelection()
+            } catch {
+                message = error.localizedDescription
+            }
+        }
+    }
+
+    private func prepareExport(_ exporting: [MediaItem], present: @escaping @MainActor () -> Void) {
+        Task {
+            do {
+                let urls = try await MediaExportService.preparedURLs(
+                    for: exporting,
+                    strippingMetadata: stripsMetadata
+                )
+                await MainActor.run {
+                    preparedExportURLs = urls
+                    present()
+                }
+            } catch {
+                await MainActor.run { message = error.localizedDescription }
+            }
+        }
+    }
+
+    private func cleanupPreparedExport() {
+        MediaExportService.cleanupPreparedURLs(preparedExportURLs)
+        preparedExportURLs = []
+        endSelection()
+    }
+
+    /// Extracted so the grid body stays small enough for the type checker, which
+    /// times out when the cell, its gestures and its menu are all inlined.
+    @ViewBuilder
+    private func receiptCell(_ item: MediaItem) -> some View {
+        ReceiptGridCard(
+            item: item,
+            isSelecting: isSelecting,
+            isSelected: selection.contains(item.id)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if isSelecting { toggle(item.id) } else { detailItem = item }
+        }
+        // `swipeActions` only does anything inside a `List`; in a grid it compiles
+        // and silently does nothing, so pin and complete live in the context menu.
+        .contextMenu { cellMenu(item) }
+    }
+
+    @ViewBuilder
+    private func cellMenu(_ item: MediaItem) -> some View {
+        Button {
+            item.isPinned.toggle()
+            try? modelContext.save()
+        } label: {
+            Label(
+                L10n.text(item.isPinned ? "고정 해제" : "고정"),
+                systemImage: item.isPinned ? "pin.slash" : "pin"
+            )
+        }
+        Button { complete(item) } label: {
+            Label(L10n.text("완료"), systemImage: "checkmark.circle")
+        }
+        Button { detailItem = item } label: {
+            Label(L10n.text("정보 수정"), systemImage: "pencil")
         }
     }
 
@@ -184,7 +382,10 @@ struct ReceiptTemplateView: View {
         } description: {
             Text(L10n.text("영수증을 촬영하거나 가져오면 자동으로 정리됩니다."))
         } actions: {
-            Button(L10n.text("영수증 촬영")) { isCameraPresented = true }
+            Button(L10n.text("영수증 촬영")) {
+                captureContext = .template(.receipt)
+                isCameraPresented = true
+            }
                 .buttonStyle(.borderedProminent)
             PhotosPicker(
                 selection: $photosSelection,
@@ -264,17 +465,11 @@ struct ReceiptTemplateView: View {
                         data: data,
                         type: selectionItem.supportedContentTypes.first
                     )
-                    let item = MediaItem(
-                        kind: stored.kind, source: .photos, localPath: stored.relativePath,
-                        thumbnailPath: stored.thumbnailRelativePath, fileName: stored.fileName,
-                        createdAt: stored.capturedAt ?? .now, fileSize: stored.fileSize,
-                        width: stored.width, height: stored.height, duration: stored.duration
-                    )
-                    modelContext.insert(item)
-                    try? modelContext.save()
-                    // Left unclassified on purpose: the OCR pass files it into the
-                    // receipt template itself, which is the flow being demonstrated.
-                    OCRService.enqueue(item, in: modelContext)
+                    await MainActor.run {
+                        let _ = TemplateCapturePipeline.insert(
+                            stored, source: .photos, purpose: .receipt, in: modelContext
+                        )
+                    }
                 } catch {
                     message = error.localizedDescription
                 }
@@ -284,6 +479,77 @@ struct ReceiptTemplateView: View {
 }
 
 // MARK: - Row
+
+/// Grid presentation for the receipt template. `ReceiptRow` stays as the
+/// horizontal form used by the report's lists; a grid cell is too narrow for a
+/// side-by-side thumbnail and text.
+struct ReceiptGridCard: View {
+    let item: MediaItem
+    var isSelecting = false
+    var isSelected = false
+
+    private var amount: ReceiptAmount? {
+        ReceiptSummaryService.amount(for: item)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            MediaThumbnail(item: item)
+                .frame(width: 72, height: 92)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .clipped()
+                .overlay(alignment: .topTrailing) {
+                    if isSelecting {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.title3)
+                            .foregroundStyle(isSelected ? Color.accentColor : Color.white)
+                            .shadow(radius: 2)
+                            .padding(6)
+                    } else if item.isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.white)
+                            .padding(4)
+                            .background(.black.opacity(0.35), in: Circle())
+                            .padding(5)
+                    }
+                }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(merchantTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(item.receiptMerchant.isEmpty ? .secondary : .primary)
+                    .lineLimit(1)
+                Text(amountTitle)
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                    .foregroundStyle(amount == nil ? .secondary : .primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(L10n.date(item.receiptDisplayDate, dateStyle: .abbreviated, timeStyle: .omitted))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 112, alignment: .leading)
+        .background(
+            Color(uiColor: .secondarySystemGroupedBackground),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var merchantTitle: String {
+        item.receiptMerchant.isEmpty ? L10n.text("상호 미확인") : item.receiptMerchant
+    }
+
+    private var amountTitle: String {
+        amount?.formatted() ?? L10n.text("금액 확인 필요")
+    }
+}
 
 struct ReceiptRow: View {
     let item: MediaItem

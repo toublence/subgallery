@@ -445,6 +445,108 @@ final class CoreFeatureTests: XCTestCase {
         XCTAssertEqual(templateItems.map(\.id), [item.id])
     }
 
+    func testHomeStructureDefaultAlbumMigrationCases1Through7() throws {
+        XCTAssertEqual(SmartAlbum.libraryCases, [.all, .pinned, .unclassified, .temporary])
+        XCTAssertEqual(CapturePresetService.templatePurposes, [.receipt, .document, .qr, .travel])
+
+        let suiteName = "DefaultAlbumMigrationTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let emptyContainer = try makeContainer()
+        let emptyContext = emptyContainer.mainContext
+        for _ in 0..<5 {
+            DefaultAlbumMigration.run(in: emptyContext, defaults: defaults)
+        }
+        var albums = try emptyContext.fetch(FetchDescriptor<Album>()).filter { !$0.isBuiltIn }
+        XCTAssertEqual(albums.count, 1)
+        XCTAssertEqual(albums[0].name, L10n.text("기본 앨범"))
+
+        albums[0].name = "업무"
+        try emptyContext.save()
+        DefaultAlbumMigration.run(in: emptyContext, defaults: defaults)
+        albums = try emptyContext.fetch(FetchDescriptor<Album>()).filter { !$0.isBuiltIn }
+        XCTAssertEqual(albums.map(\.name), ["업무"])
+
+        emptyContext.delete(albums[0])
+        try emptyContext.save()
+        DefaultAlbumMigration.run(in: emptyContext, defaults: defaults)
+        XCTAssertTrue(try emptyContext.fetch(FetchDescriptor<Album>()).isEmpty)
+
+        let existingSuiteName = "DefaultAlbumExistingUserTests-\(UUID().uuidString)"
+        let existingDefaults = try XCTUnwrap(UserDefaults(suiteName: existingSuiteName))
+        defer { existingDefaults.removePersistentDomain(forName: existingSuiteName) }
+        let existingContainer = try makeContainer()
+        let existingContext = existingContainer.mainContext
+        existingContext.insert(Album(name: "업무", sortOrder: 0))
+        existingContext.insert(Album(name: "가족", sortOrder: 1))
+        try existingContext.save()
+        DefaultAlbumMigration.run(in: existingContext, defaults: existingDefaults)
+        XCTAssertEqual(
+            Set(try existingContext.fetch(FetchDescriptor<Album>()).map(\.name)),
+            Set(["업무", "가족"])
+        )
+    }
+
+    func testExplicitCaptureContextTemplatePipelineCases1To8Rules() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let albumID = UUID()
+        XCTAssertEqual(CaptureContext.general, .general)
+        XCTAssertEqual(CaptureContext.userAlbum(albumID), .userAlbum(albumID))
+        XCTAssertEqual(CaptureContext.template(.receipt), .template(.receipt))
+
+        func stored(_ name: String, latitude: Double? = nil, longitude: Double? = nil) -> StoredMedia {
+            StoredMedia(
+                kind: .photo, relativePath: "Media/\(name).jpg", thumbnailRelativePath: nil,
+                fileName: "\(name).jpg", fileSize: 100, width: 100, height: 100,
+                duration: 0, capturedAt: .now, latitude: latitude, longitude: longitude
+            )
+        }
+
+        let receipt = TemplateCapturePipeline.insert(
+            stored("receipt"), source: .camera, purpose: .receipt,
+            in: context, analysis: receiptAnalysis()
+        )
+        XCTAssertEqual(receipt.templatePurpose, .receipt)
+        XCTAssertEqual(receipt.classificationStatus, .applied)
+        XCTAssertEqual(receipt.expirationType, .thirtyDays)
+        XCTAssertEqual(receipt.receiptMerchant, "Coffee Shop")
+
+        let qrPayload = "https://example.com/template"
+        let qr = TemplateCapturePipeline.insert(
+            stored("qr"), source: .photos, purpose: .qr,
+            in: context, analysis: qrAnalysis([qrPayload])
+        )
+        XCTAssertEqual(qr.templatePurpose, .qr)
+        XCTAssertEqual(qr.detectedQRCodes, [qrPayload])
+        XCTAssertEqual(qr.expirationType, .sevenDays)
+
+        let travel = TemplateCapturePipeline.insert(
+            stored("travel", latitude: 37.5665, longitude: 126.9780),
+            source: .photos, purpose: .travel, in: context,
+            analysis: ordinaryAnalysis()
+        )
+        XCTAssertEqual(travel.templatePurpose, .travel)
+        XCTAssertEqual(travel.latitude, 37.5665)
+        XCTAssertEqual(travel.longitude, 126.9780)
+        XCTAssertEqual(travel.expirationType, .forever)
+
+        let document = TemplateCapturePipeline.insert(
+            stored("document"), source: .camera, purpose: .document,
+            in: context, analysis: ordinaryAnalysis()
+        )
+        XCTAssertEqual(document.templatePurpose, .document)
+        XCTAssertEqual(document.ocrStatus, .completed)
+        XCTAssertEqual(document.expirationType, .forever)
+
+        for item in [receipt, qr, travel, document] {
+            XCTAssertNil(item.albumID)
+            XCTAssertFalse(item.isUnclassified)
+        }
+        XCTAssertTrue(try context.fetch(FetchDescriptor<Album>()).isEmpty)
+    }
+
     func testTemplateClassificationCase4UserAlbumRemainsIndependent() throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -959,10 +1061,10 @@ final class CoreFeatureTests: XCTestCase {
         XCTAssertEqual(item.receiptDisplayDate, printed, "the printed receipt date wins over everything")
     }
 
-    func testReceiptReportFreeTrialAllowsFifteenRenderedSessionsAndBlocksSixteenth() {
+    func testReceiptReportFreeTrialAllowsThreeRenderedSessionsAndBlocksFourth() {
         var policy = ReceiptReportTrialPolicy(used: 0)
 
-        for expectedRemaining in stride(from: 14, through: 0, by: -1) {
+        for expectedRemaining in stride(from: 2, through: 0, by: -1) {
             XCTAssertTrue(policy.canOpen(isPremium: false, hasReceiptData: true))
             policy = policy.consumingIfEligible(isPremium: false, didRenderReport: true)
             XCTAssertEqual(policy.remaining, expectedRemaining)
@@ -983,6 +1085,18 @@ final class CoreFeatureTests: XCTestCase {
             fresh.consumingIfEligible(isPremium: true, didRenderReport: true),
             fresh
         )
+    }
+
+    func testTravelMapFreeTrialAllowsFiveOpensAndBlocksSixth() {
+        var policy = TravelMapTrialPolicy(used: 0)
+        for expectedRemaining in stride(from: 4, through: 0, by: -1) {
+            XCTAssertTrue(policy.canOpen(isPremium: false))
+            policy = policy.consumingIfEligible(isPremium: false)
+            XCTAssertEqual(policy.remaining, expectedRemaining)
+        }
+        XCTAssertFalse(policy.canOpen(isPremium: false))
+        XCTAssertTrue(policy.canOpen(isPremium: true))
+        XCTAssertEqual(policy.consumingIfEligible(isPremium: true), policy)
     }
 
     func testReceiptReportUsesApprovalAmountAndExcludesIdentifierFromTotal() throws {

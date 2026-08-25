@@ -41,7 +41,10 @@ final class PurchaseManager: ObservableObject {
     static let monthlyID = "com.namslab.subgallery.premium.monthly"
     static let yearlyID = "com.namslab.subgallery.premium.yearly"
     static let lifetimeID = "com.namslab.subgallery.premium.lifetime"
-    static let productIDs = [monthlyID, yearlyID, lifetimeID]
+    /// Only subscriptions are offered. Lifetime remains in entitlement lookup so
+    /// existing owners keep Premium after it disappears from the paywall.
+    static let productIDs = [monthlyID, yearlyID]
+    static let entitlementProductIDs = [monthlyID, yearlyID, lifetimeID]
 
     @Published private(set) var products: [Product] = []
     @Published private(set) var purchasedProductIDs: Set<String> = []
@@ -61,7 +64,7 @@ final class PurchaseManager: ObservableObject {
             for await result in Transaction.updates {
                 guard let self else { return }
                 if case .verified(let transaction) = result,
-                   Self.productIDs.contains(transaction.productID) {
+                   Self.entitlementProductIDs.contains(transaction.productID) {
                     await transaction.finish()
                     await self.refreshEntitlements()
                 }
@@ -149,7 +152,7 @@ final class PurchaseManager: ObservableObject {
         var activeIDs: Set<String> = []
         for await result in Transaction.currentEntitlements {
             guard case .verified(let transaction) = result,
-                  Self.productIDs.contains(transaction.productID) else { continue }
+                  Self.entitlementProductIDs.contains(transaction.productID) else { continue }
             activeIDs.insert(transaction.productID)
         }
         purchasedProductIDs = activeIDs
@@ -166,7 +169,7 @@ final class PurchaseManager: ObservableObject {
     #if DEBUG
     func configureForTesting(productIDs: Set<String>) {
         let wasPremium = PremiumAccess.isActive
-        purchasedProductIDs = productIDs.intersection(Set(Self.productIDs))
+        purchasedProductIDs = productIDs.intersection(Set(Self.entitlementProductIDs))
         PremiumAccess.configureForTesting(isActive: isPremium)
         if wasPremium != isPremium {
             NotificationCenter.default.post(
@@ -207,9 +210,7 @@ struct PremiumView: View {
     }
 
     private var secondaryProducts: [Product] {
-        purchases.products.filter {
-            $0.id == PurchaseManager.monthlyID || $0.id == PurchaseManager.lifetimeID
-        }
+        purchases.products.filter { $0.id == PurchaseManager.monthlyID }
     }
 
     var body: some View {
@@ -378,8 +379,7 @@ struct PremiumView: View {
 
     private var purchaseBar: some View {
         VStack(spacing: 7) {
-            if purchases.purchasedProductIDs.contains(PurchaseManager.lifetimeID)
-                || selectedProduct.map({ purchases.purchasedProductIDs.contains($0.id) }) == true {
+            if purchases.isPremium {
                 Button(L10n.text("완료")) { dismiss() }
                     .prominentPurchaseButton()
             } else if let selectedProduct {
@@ -457,18 +457,11 @@ struct PremiumView: View {
         switch product.id {
         case PurchaseManager.yearlyID: L10n.text("연간으로 Premium 시작하기")
         case PurchaseManager.monthlyID: L10n.text("월간으로 Premium 시작하기")
-        case PurchaseManager.lifetimeID: L10n.text("평생 이용권 구매하기")
         default: L10n.text("구독 시작하기")
         }
     }
 
     private func chooseAvailableDefault() {
-        if let lifetime = purchases.products.first(where: {
-            $0.id == PurchaseManager.lifetimeID && purchases.purchasedProductIDs.contains($0.id)
-        }) {
-            selectedID = lifetime.id
-            return
-        }
         if let purchased = purchases.products.first(where: { purchases.purchasedProductIDs.contains($0.id) }) {
             selectedID = purchased.id
             return
@@ -486,7 +479,6 @@ private extension Product {
         switch id {
         case PurchaseManager.yearlyID: L10n.text("SubGallery Premium 연간")
         case PurchaseManager.monthlyID: L10n.text("SubGallery Premium 월간")
-        case PurchaseManager.lifetimeID: L10n.text("SubGallery Premium 평생 이용권")
         default: displayName
         }
     }
@@ -594,8 +586,6 @@ private struct SecondaryProductCard: View {
     let isPurchased: Bool
     let select: () -> Void
 
-    private var isLifetime: Bool { product.id == PurchaseManager.lifetimeID }
-
     var body: some View {
         Button(action: select) {
             VStack(alignment: .leading, spacing: 7) {
@@ -611,7 +601,7 @@ private struct SecondaryProductCard: View {
                     .font(.subheadline.bold())
                     .foregroundStyle(.primary)
                     .lineLimit(2)
-                Text(L10n.text(isLifetime ? "한 번만 결제하고 계속 사용" : "언제든지 취소할 수 있습니다."))
+                Text(L10n.text("언제든지 취소할 수 있습니다."))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)

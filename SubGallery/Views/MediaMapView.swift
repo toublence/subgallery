@@ -1,7 +1,80 @@
 import CoreLocation
 import MapKit
+import Security
 import SwiftData
 import SwiftUI
+
+struct TravelMapTrialPolicy: Equatable {
+    static let freeUseLimit = 5
+    private(set) var used: Int
+
+    init(used: Int) {
+        self.used = min(max(used, 0), Self.freeUseLimit)
+    }
+
+    var remaining: Int { max(0, Self.freeUseLimit - used) }
+    func canOpen(isPremium: Bool) -> Bool { isPremium || remaining > 0 }
+    func consumingIfEligible(isPremium: Bool) -> Self {
+        guard !isPremium, remaining > 0 else { return self }
+        return Self(used: used + 1)
+    }
+}
+
+@MainActor
+enum TravelMapUsageStore {
+    private static let service = "com.namslab.subgallery.travel-map"
+    private static let account = "travelMapFreeUsesUsed"
+
+    static var used: Int {
+        guard let data = data(), let string = String(data: data, encoding: .utf8),
+              let value = Int(string) else { return 0 }
+        return TravelMapTrialPolicy(used: value).used
+    }
+
+    static var remaining: Int { TravelMapTrialPolicy(used: used).remaining }
+
+    static func canOpen(isPremium: Bool) -> Bool {
+        TravelMapTrialPolicy(used: used).canOpen(isPremium: isPremium)
+    }
+
+    @discardableResult
+    static func consumeIfEligible(isPremium: Bool) -> Int {
+        let current = TravelMapTrialPolicy(used: used)
+        let next = current.consumingIfEligible(isPremium: isPremium)
+        guard next != current else { return current.remaining }
+        set(next.used)
+        return next.remaining
+    }
+
+    private static func set(_ value: Int) {
+        let payload = Data(String(value).utf8)
+        let match: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        let updates: [String: Any] = [kSecValueData as String: payload]
+        let status = SecItemUpdate(match as CFDictionary, updates as CFDictionary)
+        guard status == errSecItemNotFound else { return }
+        var insert = match
+        insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        insert[kSecValueData as String] = payload
+        SecItemAdd(insert as CFDictionary, nil)
+    }
+
+    private static func data() -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
+        return result as? Data
+    }
+}
 
 struct MediaMapView: View {
     @Environment(\.modelContext) private var modelContext

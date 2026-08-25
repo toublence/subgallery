@@ -4,6 +4,41 @@ import PhotosUI
 import SwiftData
 import SwiftUI
 import UIKit
+import VisionKit
+
+struct CaptureInputControls: View {
+    @Binding var selection: [PhotosPickerItem]
+    let allowsVideos: Bool
+    let captureTitle: String
+    let captureSymbol: String
+    let captureAccessibilityLabel: String
+    let capture: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            PhotosPicker(
+                selection: $selection,
+                maxSelectionCount: 0,
+                matching: allowsVideos ? .any(of: [.images, .videos]) : .images
+            ) {
+                Label(L10n.text("사진 가져오기"), systemImage: "photo.badge.plus")
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+            }
+            Divider().frame(height: 24)
+            Button(action: capture) {
+                Label(captureTitle, systemImage: captureSymbol)
+                    .fontWeight(.semibold)
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+            }
+            .accessibilityLabel(captureAccessibilityLabel)
+        }
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().stroke(.separator.opacity(0.25), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+    }
+}
 
 private struct TemporaryGroup: Identifiable {
     let title: String
@@ -58,8 +93,10 @@ struct AlbumView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \MediaItem.createdAt, order: .reverse) private var allMedia: [MediaItem]
     @Query(sort: \Album.sortOrder) private var albums: [Album]
+    @StateObject private var purchases = PurchaseManager.shared
     let destination: AlbumDestination
     @Binding var isCameraPresented: Bool
+    @Binding var captureContext: CaptureContext
     @AppStorage("camera.destinationAlbumID") private var cameraDestinationAlbumID = ""
     @AppStorage("privacy.stripMetadata") private var stripsMetadata = false
     @AppStorage("camera.purposePresetID") private var cameraPurposePresetID = "general"
@@ -77,14 +114,22 @@ struct AlbumView: View {
     @State private var deleteConfirmation = false
     @State private var photosSelection: [PhotosPickerItem] = []
     @State private var importError: String?
+    @State private var showsDocumentScanner = false
+    @State private var showsTravelMap = false
+    @State private var showsPremium = false
     @State private var bulkMessage: String?
     @State private var gridMode: AlbumGridMode
     @State private var sortMode: AlbumSortMode
     @State private var filterMode: AlbumFilterMode
 
-    init(destination: AlbumDestination, isCameraPresented: Binding<Bool>) {
+    init(
+        destination: AlbumDestination,
+        isCameraPresented: Binding<Bool>,
+        captureContext: Binding<CaptureContext> = .constant(.general)
+    ) {
         self.destination = destination
         _isCameraPresented = isCameraPresented
+        _captureContext = captureContext
         _isSelecting = State(initialValue: StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "batch")
         let key = destination.preferencesKey
         _gridMode = State(initialValue: AlbumGridMode(
@@ -162,7 +207,10 @@ struct AlbumView: View {
         if case .template(.receipt) = destination {
             // Receipts get a screen of their own: merchant, amount and date lead,
             // and the photo is supporting evidence rather than the content.
-            ReceiptTemplateView(isCameraPresented: $isCameraPresented)
+            ReceiptTemplateView(
+                isCameraPresented: $isCameraPresented,
+                captureContext: $captureContext
+            )
         } else {
             standardBody
         }
@@ -173,7 +221,7 @@ struct AlbumView: View {
             if case .smart(.temporary) = destination { temporarySummary }
             if case .template(.qr) = destination {
                 LazyVGrid(columns: TemplateGridLayout.columns, spacing: 12) {
-                    ForEach(items) { item in qrRow(item) }
+                    ForEach(items) { item in qrCard(item) }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
@@ -219,7 +267,7 @@ struct AlbumView: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
-            if let album = userAlbum, !isSelecting { albumCaptureControls(album) }
+            if !isSelecting { captureControls }
         }
         .toolbar {
             if isSelecting {
@@ -236,8 +284,8 @@ struct AlbumView: View {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if !isSelecting {
                     if case .template(.travel) = destination {
-                        NavigationLink {
-                            MediaMapView(templatePurpose: .travel, title: CapturePurpose.travel.title)
+                        Button {
+                            openTravelMap()
                         } label: {
                             Image(systemName: "map")
                         }
@@ -324,7 +372,18 @@ struct AlbumView: View {
         .sheet(isPresented: $showsFilesExporter, onDismiss: cleanupPreparedExport) {
             FilesExportPicker(urls: preparedExportURLs)
         }
-        .onChange(of: photosSelection) { _, selection in importPhotos(selection, into: userAlbum) }
+        .onChange(of: photosSelection) { _, selection in importPhotos(selection) }
+        .fullScreenCover(isPresented: $showsDocumentScanner) {
+            DocumentScannerView { images in
+                importScannedDocuments(images)
+            }
+        }
+        .navigationDestination(isPresented: $showsTravelMap) {
+            MediaMapView(templatePurpose: .travel, title: CapturePurpose.travel.title)
+        }
+        .sheet(isPresented: $showsPremium) {
+            PremiumView().presentationDetents([.large])
+        }
         .alert(L10n.text("가져올 수 없음"), isPresented: Binding(
             get: { importError != nil },
             set: { if !$0 { importError = nil } }
@@ -363,7 +422,7 @@ struct AlbumView: View {
             .accessibilityAddTraits(selection.contains(item.id) ? .isSelected : [])
     }
 
-    private func qrRow(_ item: MediaItem) -> some View {
+    private func qrCard(_ item: MediaItem) -> some View {
         QRInfoCard(
             item: item,
             isSelecting: isSelecting,
@@ -413,29 +472,47 @@ struct AlbumView: View {
         }
     }
 
-    private func albumCaptureControls(_ album: Album) -> some View {
-        HStack(spacing: 8) {
-            PhotosPicker(selection: $photosSelection, maxSelectionCount: 0, matching: .any(of: [.images, .videos])) {
-                Label(L10n.text("사진 가져오기"), systemImage: "photo.badge.plus")
-                    .padding(.horizontal, 16).padding(.vertical, 12)
-            }
-
-            Divider().frame(height: 24)
-
-            Button {
+    @ViewBuilder
+    private var captureControls: some View {
+        if let album = userAlbum {
+            CaptureInputControls(
+                selection: $photosSelection,
+                allowsVideos: true,
+                captureTitle: L10n.text("카메라"),
+                captureSymbol: "camera.fill",
+                captureAccessibilityLabel: L10n.text("카메라")
+            ) {
                 cameraPurposePresetID = "general"
                 cameraDestinationAlbumID = StorageDestination.album(album.id).token
+                captureContext = .userAlbum(album.id)
                 isCameraPresented = true
-            } label: {
-                Label(L10n.text("카메라"), systemImage: "camera.fill")
-                    .fontWeight(.semibold)
-                    .padding(.horizontal, 16).padding(.vertical, 12)
+            }
+        } else if case .template(let purpose) = destination {
+            CaptureInputControls(
+                selection: $photosSelection,
+                allowsVideos: false,
+                captureTitle: templateCaptureTitle(purpose),
+                captureSymbol: purpose == .document ? "doc.viewfinder" : "camera.fill",
+                captureAccessibilityLabel: templateCaptureTitle(purpose)
+            ) {
+                if purpose == .document {
+                    showsDocumentScanner = true
+                } else {
+                    captureContext = .template(purpose)
+                    isCameraPresented = true
+                }
             }
         }
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().stroke(.separator.opacity(0.25), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
-        .padding(.bottom, 8)
+    }
+
+    private func templateCaptureTitle(_ purpose: CapturePurpose) -> String {
+        switch purpose {
+        case .receipt: L10n.text("영수증 촬영")
+        case .qr: L10n.text("QR 촬영")
+        case .travel: L10n.text("여행 사진 촬영")
+        case .document: L10n.text("문서 스캔")
+        default: L10n.text("카메라")
+        }
     }
 
     private var temporaryGroups: [TemporaryGroup] {
@@ -659,8 +736,8 @@ struct AlbumView: View {
         }
     }
 
-    private func importPhotos(_ selection: [PhotosPickerItem], into album: Album?) {
-        guard !selection.isEmpty, let album else { return }
+    private func importPhotos(_ selection: [PhotosPickerItem]) {
+        guard !selection.isEmpty else { return }
         Task {
             defer { photosSelection = [] }
             for selectionItem in selection {
@@ -670,12 +747,68 @@ struct AlbumView: View {
                         data: data,
                         type: selectionItem.supportedContentTypes.first
                     )
-                    insert(stored, into: album)
+                    if let album = userAlbum {
+                        insert(stored, into: album)
+                    } else if case .template(let purpose) = destination {
+                        try await insert(stored, into: purpose)
+                    }
                 } catch {
                     importError = error.localizedDescription
                 }
             }
         }
+    }
+
+    private func insert(_ stored: StoredMedia, into purpose: CapturePurpose) async throws {
+        if purpose == .qr {
+            let analysis = try await OCRService.shared.analyze(at: MediaStorage.url(for: stored.relativePath))
+            guard analysis.hasQRCode else {
+                await MediaStorage.shared.remove(stored)
+                throw TemplateCaptureError.qrNotFoundInPhoto
+            }
+            await MainActor.run {
+                _ = TemplateCapturePipeline.insert(
+                    stored, source: .photos, purpose: purpose,
+                    in: modelContext, analysis: analysis
+                )
+            }
+        } else {
+            await MainActor.run {
+                _ = TemplateCapturePipeline.insert(
+                    stored, source: .photos, purpose: purpose, in: modelContext
+                )
+            }
+        }
+    }
+
+    private func importScannedDocuments(_ images: [UIImage]) {
+        Task {
+            for (index, image) in images.enumerated() {
+                guard let data = image.jpegData(compressionQuality: 0.95) else { continue }
+                do {
+                    let stored = try await MediaStorage.shared.store(
+                        data: data, type: .jpeg,
+                        preferredName: "Scan-\(index + 1).jpg"
+                    )
+                    await MainActor.run {
+                        _ = TemplateCapturePipeline.insert(
+                            stored, source: .camera, purpose: .document, in: modelContext
+                        )
+                    }
+                } catch {
+                    await MainActor.run { importError = error.localizedDescription }
+                }
+            }
+        }
+    }
+
+    private func openTravelMap() {
+        guard TravelMapUsageStore.canOpen(isPremium: purchases.isPremium) else {
+            showsPremium = true
+            return
+        }
+        TravelMapUsageStore.consumeIfEligible(isPremium: purchases.isPremium)
+        showsTravelMap = true
     }
 
     @MainActor
@@ -697,6 +830,56 @@ struct AlbumView: View {
         modelContext.insert(item)
         try? modelContext.save()
         OCRService.enqueue(item, in: modelContext)
+    }
+}
+
+enum TemplateCaptureError: LocalizedError {
+    case qrNotFoundInPhoto
+
+    var errorDescription: String? {
+        switch self {
+        case .qrNotFoundInPhoto: L10n.text("사진에서 QR 코드를 찾지 못했습니다.")
+        }
+    }
+}
+
+private struct DocumentScannerView: UIViewControllerRepresentable {
+    @Environment(\.dismiss) private var dismiss
+    let completion: ([UIImage]) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
+        let controller = VNDocumentCameraViewController()
+        controller.delegate = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: VNDocumentCameraViewController, context: Context) { }
+
+    final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
+        let parent: DocumentScannerView
+        init(parent: DocumentScannerView) { self.parent = parent }
+
+        func documentCameraViewController(
+            _ controller: VNDocumentCameraViewController,
+            didFinishWith scan: VNDocumentCameraScan
+        ) {
+            let images = (0..<scan.pageCount).map { scan.imageOfPage(at: $0) }
+            parent.completion(images)
+            parent.dismiss()
+        }
+
+        func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) {
+            parent.dismiss()
+        }
+
+        func documentCameraViewController(
+            _ controller: VNDocumentCameraViewController,
+            didFailWithError error: Error
+        ) {
+            parent.dismiss()
+        }
     }
 }
 

@@ -124,6 +124,14 @@ enum CapturePurpose: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Explicitly describes why the capture UI was opened. Template sessions are
+/// purpose-locked and never depend on transient AppStorage preset values.
+enum CaptureContext: Equatable {
+    case general
+    case userAlbum(UUID)
+    case template(CapturePurpose)
+}
+
 enum SmartClassificationStatus: String, Codable {
     case none
     case pending

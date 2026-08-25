@@ -108,6 +108,13 @@ actor MediaStorage {
         }
     }
 
+    func remove(_ stored: StoredMedia) {
+        try? fileManager.removeItem(at: Self.url(for: stored.relativePath))
+        if let thumbnailPath = stored.thumbnailRelativePath {
+            try? fileManager.removeItem(at: Self.url(for: thumbnailPath))
+        }
+    }
+
     func metadata(for relativePath: String) -> StoredMediaMetadata {
         let url = Self.url(for: relativePath)
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),

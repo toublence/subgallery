@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 enum SmartAlbum: String, Hashable {
     case all, camera, temporary, pinned, unclassified, recentlyDeleted
 
-    static let libraryCases: [SmartAlbum] = [.all, .temporary, .pinned, .unclassified]
+    static let libraryCases: [SmartAlbum] = [.all, .pinned, .unclassified, .temporary]
 
     var title: String {
         switch self {
@@ -45,6 +45,7 @@ struct LibraryView: View {
     @Query(sort: \Album.sortOrder) private var albums: [Album]
     @Query(sort: \MediaItem.createdAt, order: .reverse) private var media: [MediaItem]
     @Binding var isCameraPresented: Bool
+    @Binding var captureContext: CaptureContext
     @Binding var requestedDestination: AlbumDestination?
     @Binding var requestedOnboardingAction: OnboardingAction?
     @AppStorage("storage.defaultRetention") private var defaultRetentionRaw = RetentionPolicy.forever.rawValue
@@ -110,13 +111,6 @@ struct LibraryView: View {
             ScrollView {
                 if searchText.isEmpty {
                     VStack(alignment: .leading, spacing: 28) {
-                        if !media.filter({ $0.deletedAt == nil }).isEmpty {
-                            CleanupSummaryCard(summary: CleanupSummary(items: media)) {
-                                if purchases.isPremium { showsCleanupCenter = true }
-                                else { showsPremium = true }
-                            }
-                        }
-
                         VStack(alignment: .leading, spacing: 14) {
                             Text(L10n.text("보관함"))
                                 .font(.title2.bold())
@@ -137,11 +131,31 @@ struct LibraryView: View {
                             }
                         }
 
-                        if !userAlbums.isEmpty {
-                            VStack(alignment: .leading, spacing: 14) {
-                                Text(L10n.text("내 앨범"))
-                                    .font(.title2.bold())
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text(L10n.text("내 앨범"))
+                                .font(.title2.bold())
 
+                            if userAlbums.isEmpty {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "rectangle.stack")
+                                        .foregroundStyle(.secondary)
+                                    Text(L10n.text("만든 앨범이 없습니다."))
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Button {
+                                        showsNewAlbum = true
+                                    } label: {
+                                        Label(L10n.text("새 앨범"), systemImage: "plus")
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                                .padding(14)
+                                .background(
+                                    Color(uiColor: .secondarySystemGroupedBackground),
+                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                )
+                            } else {
                                 LazyVGrid(columns: columns, spacing: albumGridSpacing) {
                                     ForEach(userAlbums) { album in
                                         userAlbumTile(album)
@@ -158,6 +172,13 @@ struct LibraryView: View {
                                 ForEach(CapturePresetService.templatePurposes) { purpose in
                                     templateTile(purpose)
                                 }
+                            }
+                        }
+
+                        if !media.filter({ $0.deletedAt == nil }).isEmpty {
+                            CleanupSummaryCard(summary: CleanupSummary(items: media)) {
+                                if purchases.isPremium { showsCleanupCenter = true }
+                                else { showsPremium = true }
                             }
                         }
                     }
@@ -197,7 +218,11 @@ struct LibraryView: View {
             }
             .safeAreaInset(edge: .bottom) { floatingControls }
             .navigationDestination(for: AlbumDestination.self) {
-                AlbumView(destination: $0, isCameraPresented: $isCameraPresented)
+                AlbumView(
+                    destination: $0,
+                    isCameraPresented: $isCameraPresented,
+                    captureContext: $captureContext
+                )
             }
             .onChange(of: requestedDestination) { _, destination in
                 guard let destination else { return }
@@ -378,6 +403,7 @@ struct LibraryView: View {
             Button {
                 cameraPurposePresetID = "general"
                 cameraDestinationAlbumID = defaultCameraDestination
+                captureContext = .general
                 isCameraPresented = true
             } label: {
                 Label(L10n.text("카메라"), systemImage: "camera.fill")

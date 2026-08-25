@@ -261,3 +261,7 @@
 "전체 지출의 %@가 %@에서 발생" = "El %@ del gasto total fue en %@";
 "상위 3개 결제가 전체 지출의 %@" = "Los 3 pagos principales representan el %@ del gasto total";
 "가장 큰 결제는 평균의 %@배" = "El mayor pago fue %@ veces el promedio";
+"QR 촬영" = "Capturar código QR";
+"문서 스캔" = "Escanear documento";
+"여행 사진 촬영" = "Capturar foto de viaje";
+"사진에서 QR 코드를 찾지 못했습니다." = "No se encontró ningún código QR en esta foto.";

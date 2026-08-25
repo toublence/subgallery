@@ -1,4 +1,13 @@
+import Foundation
 import SwiftData
+
+struct CaptureTemplateConfiguration {
+    let retention: RetentionPolicy
+    let ocrEnabled: Bool
+    let savesLocation: Bool
+    let autoPins: Bool
+    let primaryAction: PrimaryMediaAction
+}
 
 @MainActor
 enum CapturePresetService {
@@ -26,12 +35,20 @@ enum CapturePresetService {
                 context: context
             )
         }
+        let currentPresets = (try? context.fetch(FetchDescriptor<CapturePreset>())) ?? []
+        for preset in currentPresets where preset.isBuiltIn {
+            if preset.purpose == .general {
+                preset.sortOrder = 0
+            } else if let index = allTemplatePurposes.firstIndex(of: preset.purpose) {
+                preset.sortOrder = index + 1
+            }
+        }
         try? context.save()
     }
 
-    static let templatePurposes: [CapturePurpose] = [.receipt, .travel, .document, .qr]
+    static let templatePurposes: [CapturePurpose] = [.receipt, .document, .qr, .travel]
     private static let allTemplatePurposes: [CapturePurpose] = [
-        .receipt, .travel, .document, .qr, .temporary
+        .receipt, .document, .qr, .travel, .temporary
     ]
 
     private static let removedParkingPurposeRaw = "parking"
@@ -110,26 +127,20 @@ enum CapturePresetService {
         try? context.save()
     }
 
-    private static func templateConfiguration(for purpose: CapturePurpose) -> (
-        retention: RetentionPolicy,
-        ocrEnabled: Bool,
-        savesLocation: Bool,
-        autoPins: Bool,
-        primaryAction: PrimaryMediaAction
-    ) {
+    static func templateConfiguration(for purpose: CapturePurpose) -> CaptureTemplateConfiguration {
         switch purpose {
         case .receipt:
-            (.thirtyDays, true, false, false, .shareAndComplete)
+            CaptureTemplateConfiguration(retention: .thirtyDays, ocrEnabled: true, savesLocation: false, autoPins: false, primaryAction: .shareAndComplete)
         case .document:
-            (.forever, true, false, false, .automatic)
+            CaptureTemplateConfiguration(retention: .forever, ocrEnabled: true, savesLocation: false, autoPins: false, primaryAction: .automatic)
         case .travel:
-            (.forever, true, true, false, .automatic)
+            CaptureTemplateConfiguration(retention: .forever, ocrEnabled: true, savesLocation: true, autoPins: false, primaryAction: .automatic)
         case .qr:
-            (.sevenDays, true, false, false, .open)
+            CaptureTemplateConfiguration(retention: .sevenDays, ocrEnabled: true, savesLocation: false, autoPins: false, primaryAction: .open)
         case .temporary:
-            (.sevenDays, true, false, false, .automatic)
+            CaptureTemplateConfiguration(retention: .sevenDays, ocrEnabled: true, savesLocation: false, autoPins: false, primaryAction: .automatic)
         default:
-            (.forever, true, false, false, .automatic)
+            CaptureTemplateConfiguration(retention: .forever, ocrEnabled: true, savesLocation: false, autoPins: false, primaryAction: .automatic)
         }
     }
 
@@ -156,5 +167,76 @@ enum CapturePresetService {
         preset.sortOrder = sortOrder
         preset.isBuiltIn = true
         context.insert(preset)
+    }
+}
+
+@MainActor
+enum DefaultAlbumMigration {
+    static let completionKey = "migration.default-user-album.v1.completed"
+
+    static func run(in context: ModelContext, defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: completionKey) else { return }
+        let albums = (try? context.fetch(FetchDescriptor<Album>())) ?? []
+        let userAlbums = albums.filter { !$0.isBuiltIn }
+
+        if userAlbums.isEmpty {
+            context.insert(Album(name: L10n.text("기본 앨범"), sortOrder: 0))
+        }
+
+        do {
+            try context.save()
+            // This marker, rather than the editable album name, prevents both
+            // relaunch duplication and recreation after the user deletes it.
+            defaults.set(true, forKey: completionKey)
+        } catch {
+            // Retry next launch if persistence was unavailable.
+        }
+    }
+}
+
+@MainActor
+enum TemplateCapturePipeline {
+    static func insert(
+        _ stored: StoredMedia,
+        source: MediaSource,
+        purpose: CapturePurpose,
+        in context: ModelContext,
+        location: (latitude: Double, longitude: Double)? = nil,
+        analysis: MediaAnalysisResult? = nil
+    ) -> MediaItem {
+        let item = MediaItem(
+            kind: stored.kind, source: source, localPath: stored.relativePath,
+            thumbnailPath: stored.thumbnailRelativePath, fileName: stored.fileName,
+            createdAt: stored.capturedAt ?? .now, fileSize: stored.fileSize,
+            width: stored.width, height: stored.height, duration: stored.duration
+        )
+        let configuration = CapturePresetService.templateConfiguration(for: purpose)
+        item.latitude = location?.latitude ?? stored.latitude
+        item.longitude = location?.longitude ?? stored.longitude
+        item.albumID = nil
+        item.templatePurpose = purpose
+        item.analysisEnabled = configuration.ocrEnabled
+        item.primaryAction = configuration.primaryAction
+        item.isPinned = configuration.autoPins
+        item.suggestedPurpose = nil
+        item.suggestedAlbumID = nil
+        item.suggestedRetention = nil
+        item.classificationStatus = .applied
+        RetentionService.apply(configuration.retention, to: item)
+        context.insert(item)
+
+        if let analysis {
+            item.recognizedText = analysis.text
+            item.detectedURLs = analysis.urls
+            item.detectedPhoneNumbers = analysis.phoneNumbers
+            item.detectedAddresses = analysis.addresses
+            item.detectedDates = analysis.dates
+            item.detectedQRCodes = analysis.qrCodes
+            if purpose == .receipt { ReceiptInfoWriter.apply(analysis, to: item) }
+            item.ocrStatus = .completed
+        }
+        try? context.save()
+        if analysis == nil { OCRService.enqueue(item, in: context) }
+        return item
     }
 }

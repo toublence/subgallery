@@ -212,6 +212,7 @@ struct SubGalleryApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
     @State private var isCameraPresented = false
+    @State private var captureContext: CaptureContext = .general
     @State private var obscuresContent = false
     @State private var isUnlocked = false
     @State private var deepLink: MediaDeepLink?
@@ -238,7 +239,7 @@ struct SubGalleryApp: App {
                 if let errorMessage = dataStore.errorMessage {
                     DataStoreErrorView(message: errorMessage)
                 } else if StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "camera" {
-                    CameraView { destination in
+                    CameraView(context: captureContext) { destination in
                         requestedLibraryDestination = destination
                     }
                 } else if StoreScreenshotMode.isEnabled && StoreScreenshotMode.screen == "batch" {
@@ -250,6 +251,7 @@ struct SubGalleryApp: App {
                 } else {
                     LibraryView(
                         isCameraPresented: $isCameraPresented,
+                        captureContext: $captureContext,
                         requestedDestination: $requestedLibraryDestination,
                         requestedOnboardingAction: $requestedOnboardingAction
                     )
@@ -274,7 +276,7 @@ struct SubGalleryApp: App {
                 .environment(\.locale, (AppLanguage(rawValue: appLanguageRaw) ?? .system).locale)
             }
             .fullScreenCover(isPresented: $isCameraPresented) {
-                CameraView { destination in
+                CameraView(context: captureContext) { destination in
                     requestedLibraryDestination = destination
                     isCameraPresented = false
                 }
@@ -295,6 +297,7 @@ struct SubGalleryApp: App {
             .onOpenURL { url in
                 if url.host == "capture" {
                     currentCameraDestination = defaultCameraDestination
+                    captureContext = .general
                     isCameraPresented = true
                 } else if url.host == "media",
                           let id = UUID(uuidString: url.pathComponents.last ?? "") {
@@ -349,6 +352,7 @@ struct SubGalleryApp: App {
                         await reconcileCloudMediaAssets()
                     }
                     CapturePresetService.seedBuiltIns(in: dataStore.container.mainContext)
+                    DefaultAlbumMigration.run(in: dataStore.container.mainContext)
                     // Free of charge and independent of the premium backfill: a
                     // receipt showing the wrong total is a defect, not a locked feature.
                     ReceiptAmountMigration.run(in: dataStore.container.mainContext)
@@ -434,7 +438,10 @@ struct SubGalleryApp: App {
         didApplyInitialStartScreen = true
         let start = AppStartScreen(rawValue: startScreenRaw) ?? .library
         let opensCamera = start == .camera || (start == .last && lastScreenRaw == AppStartScreen.camera.rawValue)
-        if opensCamera { currentCameraDestination = defaultCameraDestination }
+        if opensCamera {
+            currentCameraDestination = defaultCameraDestination
+            captureContext = .general
+        }
         isCameraPresented = opensCamera
     }
 
@@ -444,6 +451,7 @@ struct SubGalleryApp: App {
         switch action {
         case .camera:
             currentCameraDestination = defaultCameraDestination
+            captureContext = .general
             isCameraPresented = true
             requestedOnboardingAction = nil
         case .importPhotos:

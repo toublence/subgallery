@@ -9,6 +9,7 @@ struct CameraView: View {
     @Query(sort: \Album.sortOrder) private var albums: [Album]
     @Query(sort: \MediaItem.createdAt, order: .reverse) private var media: [MediaItem]
     @Query(sort: \CapturePreset.sortOrder) private var presets: [CapturePreset]
+    let context: CaptureContext
     let onOpenLibrary: (AlbumDestination) -> Void
     @StateObject private var purchases = PurchaseManager.shared
     @StateObject private var camera = CameraController()
@@ -22,6 +23,8 @@ struct CameraView: View {
     @State private var showsRetentionCoachMark = false
     @State private var classificationItem: MediaItem?
     @State private var automaticClassificationNotice: SmartClassificationService.AutomaticClassificationNotice?
+    @State private var qrFailureStoredMedia: StoredMedia?
+    @State private var showsLocationUnavailableNotice = false
     @AppStorage("storage.defaultRetention") private var defaultRetentionRaw = RetentionPolicy.forever.rawValue
     @AppStorage("storage.defaultRetentionDate") private var defaultRetentionDate = 0.0
     @AppStorage("camera.lastMode") private var lastMode = MediaKind.photo.rawValue
@@ -35,12 +38,32 @@ struct CameraView: View {
     @AppStorage("education.cameraAlbumCoachMarkSeen") private var albumCoachMarkSeen = false
     @AppStorage("education.retentionCoachMarkSeen") private var retentionCoachMarkSeen = false
 
+    init(
+        context: CaptureContext = .general,
+        onOpenLibrary: @escaping (AlbumDestination) -> Void
+    ) {
+        self.context = context
+        self.onOpenLibrary = onOpenLibrary
+    }
+
+    private var templatePurpose: CapturePurpose? {
+        guard case .template(let purpose) = context else { return nil }
+        return purpose
+    }
+
     private var destination: StorageDestination {
         StorageDestination(token: destinationAlbumID)
     }
 
     private var destinationAlbum: Album? {
-        guard case .album(let id) = destination else { return nil }
+        let id: UUID
+        if case .userAlbum(let albumID) = context {
+            id = albumID
+        } else if case .album(let albumID) = destination {
+            id = albumID
+        } else {
+            return nil
+        }
         return albums.first { $0.id == id }
     }
 
@@ -57,6 +80,9 @@ struct CameraView: View {
     }
 
     private var activePreset: CapturePreset? {
+        if let templatePurpose {
+            return presets.first { $0.isBuiltIn && $0.purpose == templatePurpose }
+        }
         guard let selectedPreset,
               CapturePresetService.canUse(selectedPreset, hasPremium: purchases.isPremium),
               selectedPreset.purpose != .general else { return nil }
@@ -68,13 +94,14 @@ struct CameraView: View {
     }
 
     private var purposeName: String {
-        activePreset?.displayName ?? destinationAlbum.map { $0.purpose == .custom ? L10n.text("일반") : $0.purpose.title }
+        templatePurpose?.title ?? activePreset?.displayName ?? destinationAlbum.map { $0.purpose == .custom ? L10n.text("일반") : $0.purpose.title }
             ?? L10n.text("일반")
     }
 
     private var libraryThumbnail: MediaItem? {
         lastCapture ?? media.first {
             guard $0.deletedAt == nil else { return false }
+            if let templatePurpose { return $0.templatePurpose == templatePurpose }
             if let destinationAlbum { return $0.albumID == destinationAlbum.id }
             if destination == .temporary { return $0.expirationDate != nil || $0.waitingForCompletion }
             return $0.source == .camera
@@ -97,6 +124,22 @@ struct CameraView: View {
                 Button(L10n.text("취소"), role: .cancel) { }
                 Button(L10n.text("설정 열기"), action: openAppSettings)
             }
+            .alert(L10n.text("QR 코드를 찾지 못했습니다."), isPresented: Binding(
+                get: { qrFailureStoredMedia != nil },
+                set: { if !$0 { discardFailedQR() } }
+            )) {
+                Button(L10n.text("다시 촬영"), role: .cancel) { discardFailedQR() }
+                Button(L10n.text("사진으로 보관")) { saveFailedQRAsPhoto() }
+            }
+            .overlay(alignment: .top) {
+                if showsLocationUnavailableNotice {
+                    Text(L10n.text("위치 정보 없이 저장됩니다."))
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14).padding(.vertical, 9)
+                        .background(.regularMaterial, in: Capsule())
+                        .padding(.top, 64)
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .smartClassificationSuggested)) { notification in
                 guard let id = notification.object as? UUID,
                       lastCapture?.id == id,
@@ -117,6 +160,14 @@ struct CameraView: View {
                 guard let notice = notification.object as? SmartClassificationService.AutomaticClassificationNotice,
                       lastCapture?.id == notice.itemID else { return }
                 showAutomaticClassificationNotice(notice)
+            }
+            .onChange(of: locationProvider.authorizationDenied) { _, denied in
+                guard denied, templatePurpose == .travel else { return }
+                showsLocationUnavailableNotice = true
+                Task {
+                    try? await Task.sleep(for: .seconds(4))
+                    showsLocationUnavailableNotice = false
+                }
             }
             .sheet(item: $classificationItem) { item in
                 SmartClassificationSuggestionView(item: item)
@@ -164,7 +215,9 @@ struct CameraView: View {
 
     private func startCamera() {
         if !loadedDefaults {
-            if let destinationAlbum {
+            if let templatePurpose {
+                retention = CapturePresetService.templateConfiguration(for: templatePurpose).retention
+            } else if let destinationAlbum {
                 retention = destinationAlbum.defaultRetention
             } else if destination == .temporary {
                 retention = .sevenDays
@@ -172,7 +225,7 @@ struct CameraView: View {
                 retention = RetentionPolicy(rawValue: defaultRetentionRaw) ?? .forever
             }
             aspectRatio = lastAspectRatio
-            camera.mode = MediaKind(rawValue: lastMode) ?? .photo
+            camera.mode = templatePurpose == nil ? (MediaKind(rawValue: lastMode) ?? .photo) : .photo
             camera.flashMode = lastFlash ? .on : .off
             camera.preferredLensID = lastLensID.isEmpty ? nil : lastLensID
             camera.preferredZoomFactor = CGFloat(lastZoom)
@@ -182,7 +235,10 @@ struct CameraView: View {
         camera.onPhoto = storePhoto
         camera.onVideo = storeVideo
         if StoreScreenshotMode.isEnabled { return }
-        if shouldSaveLocation { locationProvider.requestCurrentLocation() }
+        if shouldSaveLocation {
+            locationProvider.requestCurrentLocation()
+            showsLocationUnavailableNotice = locationProvider.authorizationDenied
+        }
         camera.requestAndStart()
     }
 
@@ -221,7 +277,7 @@ struct CameraView: View {
                 Button { dismiss() } label: { Image(systemName: "xmark") }
                     .disabled(camera.isRecording)
                 Spacer()
-                purposeMenu.disabled(camera.isRecording)
+                purposeMenu.disabled(camera.isRecording || templatePurpose != nil)
                 if camera.mode == .photo {
                     Menu {
                         ForEach(["4:3", "1:1", "16:9"], id: \.self) { ratio in Button(ratio) { aspectRatio = ratio } }
@@ -229,7 +285,7 @@ struct CameraView: View {
                 } else {
                     videoFormatMenu
                 }
-                retentionMenu
+                retentionMenu.disabled(templatePurpose != nil)
                 if camera.supportsFlash {
                     Button { camera.flashMode = camera.flashMode == .off ? .on : .off } label: {
                         Image(systemName: camera.flashMode == .off ? "bolt.slash.fill" : "bolt.fill")
@@ -253,13 +309,15 @@ struct CameraView: View {
 
             if camera.mode == .photo { photoAdjustments }
 
-            Picker(L10n.text("촬영 모드"), selection: $camera.mode) {
-                Text(L10n.text("사진")).tag(MediaKind.photo)
-                Text(L10n.text("동영상")).tag(MediaKind.video)
+            if templatePurpose == nil {
+                Picker(L10n.text("촬영 모드"), selection: $camera.mode) {
+                    Text(L10n.text("사진")).tag(MediaKind.photo)
+                    Text(L10n.text("동영상")).tag(MediaKind.video)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 190)
+                .disabled(camera.isRecording)
             }
-            .pickerStyle(.segmented)
-            .frame(width: 190)
-            .disabled(camera.isRecording)
 
             HStack {
                 Group {
@@ -523,12 +581,27 @@ struct CameraView: View {
         Task {
             let output = croppedPhotoData(data) ?? data
             guard let stored = try? await MediaStorage.shared.store(data: output, type: .jpeg) else { return }
-            await insert(stored, realtimeQRPayload: qrPayload)
+            if templatePurpose == .qr, qrPayload == nil {
+                do {
+                    let analysis = try await OCRService.shared.analyze(at: MediaStorage.url(for: stored.relativePath))
+                    guard analysis.hasQRCode else {
+                        await MainActor.run { qrFailureStoredMedia = stored }
+                        return
+                    }
+                    insert(stored, analysis: analysis)
+                } catch {
+                    await MainActor.run { qrFailureStoredMedia = stored }
+                }
+            } else {
+                insert(stored, realtimeQRPayload: qrPayload)
+            }
         }
     }
 
     private func openInternalLibrary() {
-        if let album = destinationAlbum {
+        if let templatePurpose {
+            onOpenLibrary(.template(templatePurpose))
+        } else if let album = destinationAlbum {
             onOpenLibrary(.user(album.id, album.displayName))
         } else if destination == .temporary {
             onOpenLibrary(.smart(.temporary))
@@ -565,12 +638,33 @@ struct CameraView: View {
         Task {
             defer { try? FileManager.default.removeItem(at: url) }
             guard let stored = try? await MediaStorage.shared.store(fileAt: url, type: .quickTimeMovie) else { return }
-            await insert(stored)
+            insert(stored)
         }
     }
 
     @MainActor
-    private func insert(_ stored: StoredMedia, realtimeQRPayload: String? = nil) {
+    private func insert(
+        _ stored: StoredMedia,
+        realtimeQRPayload: String? = nil,
+        analysis: MediaAnalysisResult? = nil
+    ) {
+        if let templatePurpose {
+            let location = shouldSaveLocation ? locationProvider.latestLocation.map {
+                (latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)
+            } : nil
+            let item = TemplateCapturePipeline.insert(
+                stored, source: .camera, purpose: templatePurpose,
+                in: modelContext, location: location, analysis: analysis
+            )
+            if let realtimeQRPayload {
+                item.detectedQRCodes = OCRService.merged(item.detectedQRCodes, [realtimeQRPayload])
+                try? modelContext.save()
+            }
+            lastCapture = item
+            ReviewPromptPolicy.recordSuccessfulSave()
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            return
+        }
         let item = MediaItem(
             kind: stored.kind, source: .camera, localPath: stored.relativePath,
             thumbnailPath: stored.thumbnailRelativePath, fileName: stored.fileName,
@@ -641,7 +735,10 @@ struct CameraView: View {
     }
 
     private var shouldSaveLocation: Bool {
-        activePreset?.savesLocation ?? destinationAlbum?.savesLocation ?? savesLocation
+        if let templatePurpose {
+            return CapturePresetService.templateConfiguration(for: templatePurpose).savesLocation
+        }
+        return activePreset?.savesLocation ?? destinationAlbum?.savesLocation ?? savesLocation
     }
 
     private func selectPreset(_ preset: CapturePreset) {
@@ -671,6 +768,10 @@ struct CameraView: View {
     }
 
     private func applyPurposeRules() {
+        if let templatePurpose {
+            retention = CapturePresetService.templateConfiguration(for: templatePurpose).retention
+            return
+        }
         guard let selectedPreset,
               CapturePresetService.canUse(selectedPreset, hasPremium: purchases.isPremium) else {
             purposePresetID = "general"
@@ -685,6 +786,32 @@ struct CameraView: View {
             }
             retention = selectedPreset.retention
         }
+    }
+
+    private func discardFailedQR() {
+        guard let stored = qrFailureStoredMedia else { return }
+        qrFailureStoredMedia = nil
+        Task { await MediaStorage.shared.remove(stored) }
+    }
+
+    private func saveFailedQRAsPhoto() {
+        guard let stored = qrFailureStoredMedia else { return }
+        qrFailureStoredMedia = nil
+        let item = MediaItem(
+            kind: stored.kind, source: .camera, localPath: stored.relativePath,
+            thumbnailPath: stored.thumbnailRelativePath, fileName: stored.fileName,
+            createdAt: stored.capturedAt ?? .now, fileSize: stored.fileSize,
+            width: stored.width, height: stored.height, duration: stored.duration
+        )
+        item.latitude = stored.latitude
+        item.longitude = stored.longitude
+        item.purpose = .general
+        item.classificationStatus = .pending
+        RetentionService.apply(RetentionPolicy(rawValue: defaultRetentionRaw) ?? .forever, to: item)
+        modelContext.insert(item)
+        try? modelContext.save()
+        OCRService.enqueue(item, in: modelContext)
+        lastCapture = item
     }
 
     private func persistCameraState(
@@ -737,6 +864,7 @@ private struct CameraPersistenceSnapshot: Equatable {
 
 private final class CaptureLocationProvider: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
     @Published private(set) var latestLocation: CLLocation?
+    @Published private(set) var authorizationDenied = false
     private let manager = CLLocationManager()
     private var requestsLocationAfterAuthorization = false
 
@@ -747,6 +875,7 @@ private final class CaptureLocationProvider: NSObject, ObservableObject, @precon
     }
 
     func requestCurrentLocation() {
+        authorizationDenied = false
         switch manager.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse:
             manager.requestLocation()
@@ -754,11 +883,13 @@ private final class CaptureLocationProvider: NSObject, ObservableObject, @precon
             requestsLocationAfterAuthorization = true
             manager.requestWhenInUseAuthorization()
         default:
+            authorizationDenied = true
             break
         }
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        authorizationDenied = manager.authorizationStatus == .denied || manager.authorizationStatus == .restricted
         guard requestsLocationAfterAuthorization,
               manager.authorizationStatus == .authorizedAlways
                 || manager.authorizationStatus == .authorizedWhenInUse else { return }
