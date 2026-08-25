@@ -117,6 +117,7 @@ struct AlbumView: View {
         switch destination {
         case .smart(let smart): smart.title
         case .user(let id, let name): albums.first { $0.id == id }?.displayName ?? name
+        case .template(let purpose): purpose.title
         }
     }
 
@@ -131,9 +132,12 @@ struct AlbumView: View {
         case .smart(.camera): allMedia.filter { $0.deletedAt == nil && $0.source == .camera }
         case .smart(.temporary): allMedia.filter { $0.deletedAt == nil && ($0.expirationDate != nil || $0.waitingForCompletion) }
         case .smart(.pinned): allMedia.filter { $0.deletedAt == nil && $0.isPinned }
-        case .smart(.unclassified): allMedia.filter { $0.deletedAt == nil && $0.albumID == nil }
+        case .smart(.unclassified): allMedia.filter { $0.deletedAt == nil && $0.isUnclassified }
         case .smart(.recentlyDeleted): allMedia.filter { $0.deletedAt != nil }
         case .user(let id, _): allMedia.filter { $0.deletedAt == nil && $0.albumID == id }
+        case .template(let purpose): allMedia.filter {
+            $0.deletedAt == nil && $0.templatePurpose == purpose
+        }
         }
     }
 
@@ -154,26 +158,35 @@ struct AlbumView: View {
     var body: some View {
         ScrollView {
             if case .smart(.temporary) = destination { temporarySummary }
-            LazyVGrid(columns: columns, spacing: gridSpacing) {
-                if case .smart(.temporary) = destination {
-                    ForEach(temporaryGroups) { group in
-                        Section {
-                            ForEach(group.items) { item in mediaCell(item) }
-                        } header: {
-                            Text(group.title)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.top, 12)
-                        }
-                    }
-                } else {
-                    ForEach(items) { item in mediaCell(item) }
+            if case .template(.receipt) = destination {
+                LazyVStack(spacing: 10) {
+                    ForEach(items) { item in receiptRow(item) }
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 20)
+            } else {
+                LazyVGrid(columns: columns, spacing: gridSpacing) {
+                    if case .smart(.temporary) = destination {
+                        ForEach(temporaryGroups) { group in
+                            Section {
+                                ForEach(group.items) { item in mediaCell(item) }
+                            } header: {
+                                Text(group.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.top, 12)
+                            }
+                        }
+                    } else {
+                        ForEach(items) { item in mediaCell(item) }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 20)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 12)
-            .padding(.bottom, 20)
         }
         .overlay {
             if items.isEmpty {
@@ -315,6 +328,44 @@ struct AlbumView: View {
             .accessibilityAddTraits(selection.contains(item.id) ? .isSelected : [])
     }
 
+    private func receiptRow(_ item: MediaItem) -> some View {
+        Button {
+            if isSelecting { toggle(item.id) } else { viewerItem = item }
+        } label: {
+            HStack(spacing: 14) {
+                MediaThumbnail(item: item)
+                    .frame(width: 76, height: 76)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(item.receiptMerchant.isEmpty ? L10n.text("영수증 정보") : item.receiptMerchant)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text((item.receiptDate ?? item.detectedDates.first ?? item.createdAt).formatted(
+                        date: .abbreviated,
+                        time: .omitted
+                    ))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                if !item.receiptAmount.isEmpty {
+                    Text(item.receiptAmount)
+                        .font(.headline.monospacedDigit())
+                        .lineLimit(1)
+                }
+                if isSelecting {
+                    Image(systemName: selection.contains(item.id) ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selection.contains(item.id) ? Color.accentColor : Color.secondary)
+                }
+            }
+            .padding(10)
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .contextMenu { contextMenu(for: item) }
+        .accessibilityAddTraits(selection.contains(item.id) ? .isSelected : [])
+    }
+
     private var displayOptionsMenu: some View {
         Menu {
             Menu("보기") {
@@ -339,9 +390,9 @@ struct AlbumView: View {
                 }
             }
             Divider()
-            if let album = userAlbum, album.purpose == .travel {
+            if case .template(.travel) = destination {
                 NavigationLink {
-                    MediaMapView(albumID: album.id, albumName: album.displayName)
+                    MediaMapView(templatePurpose: .travel, title: CapturePurpose.travel.title)
                 } label: {
                     Label(L10n.text("지도"), systemImage: "map")
                 }
@@ -767,6 +818,7 @@ private extension AlbumDestination {
         switch self {
         case .smart(let smart): "smart.\(smart.rawValue)"
         case .user(let id, _): "user.\(id.uuidString)"
+        case .template(let purpose): "template.\(purpose.rawValue)"
         }
     }
 }

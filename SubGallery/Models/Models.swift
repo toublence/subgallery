@@ -273,6 +273,18 @@ final class MediaItem {
         get { CapturePurpose(rawValue: purposeRaw) ?? .general }
         set { purposeRaw = newValue.rawValue }
     }
+    var templatePurpose: CapturePurpose? {
+        get {
+            switch purpose {
+            case .receipt, .parking, .document, .qr, .temporary, .travel:
+                purpose
+            case .general, .custom:
+                nil
+            }
+        }
+        set { purpose = newValue ?? .general }
+    }
+    var isUnclassified: Bool { albumID == nil && templatePurpose == nil }
     var primaryAction: PrimaryMediaAction {
         get { PrimaryMediaAction(rawValue: primaryActionRaw) ?? .automatic }
         set { primaryActionRaw = newValue.rawValue }

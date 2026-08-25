@@ -516,3 +516,6 @@
 "사진 지도" = "Photo map";
 "위치 · 완료" = "Location · completion";
 "OCR · PDF" = "OCR · PDF";
+"%@ 템플릿으로 자동 정리했어요" = "Organized with the %@ template";
+"실행 취소" = "Undo";
+"열기 · 복사" = "Open · copy";

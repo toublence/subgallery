@@ -6,8 +6,8 @@ import SwiftUI
 struct MediaMapView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \MediaItem.createdAt, order: .reverse) private var media: [MediaItem]
-    let albumID: UUID
-    let albumName: String
+    let templatePurpose: CapturePurpose
+    let title: String
     @StateObject private var placeNames = MapPlaceNameStore()
     @State private var section: MapSection = .map
     @State private var position: MapCameraPosition = .automatic
@@ -20,7 +20,7 @@ struct MediaMapView: View {
     private var allLocatedItems: [MediaItem] {
         media.filter { item in
             item.deletedAt == nil
-                && item.albumID == albumID
+                && item.templatePurpose == templatePurpose
                 && item.latitude.map { (-90...90).contains($0) } == true
                 && item.longitude.map { (-180...180).contains($0) } == true
         }
@@ -63,7 +63,7 @@ struct MediaMapView: View {
         }
         .background(section == .map ? Color.travelInk : Color(.systemGroupedBackground))
         .safeAreaInset(edge: .top, spacing: 0) { journeyControls }
-        .navigationTitle(L10n.format("%@ 지도", albumName))
+        .navigationTitle(L10n.format("%@ 지도", title))
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(item: $viewerItem) { item in
             MediaViewer(items: locatedItems, initialID: item.id, isRecentlyDeleted: false)
@@ -93,7 +93,7 @@ struct MediaMapView: View {
                 .frame(width: 42, height: 42)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(albumName)
+                    Text(title)
                         .font(.headline)
                     Text(mapSummary)
                         .font(.caption)
@@ -316,7 +316,7 @@ struct MediaMapView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(placeNames.names[cluster.placeKey] ?? L10n.text("이 위치의 기록"))
                         .font(.title3.bold())
-                    Text(L10n.format("%@의 여행 기록", albumName))
+                    Text(L10n.format("%@의 여행 기록", title))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -510,7 +510,9 @@ struct MediaMapView: View {
     @MainActor
     private func backfillStoredMetadata() async {
         var changed = false
-        for item in media where item.deletedAt == nil && item.albumID == albumID && item.kind == .photo
+        for item in media where item.deletedAt == nil
+            && item.templatePurpose == templatePurpose
+            && item.kind == .photo
             && (item.latitude == nil || item.longitude == nil) {
             _ = item.mediaURL
             let metadata = await MediaStorage.shared.metadata(for: item.localPath)

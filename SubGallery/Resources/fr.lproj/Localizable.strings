@@ -157,3 +157,6 @@
 "사진 지도" = "Carte photo";
 "위치 · 완료" = "Lieu · terminé";
 "OCR · PDF" = "OCR · PDF";
+"%@ 템플릿으로 자동 정리했어요" = "Classé avec le modèle %@";
+"실행 취소" = "Annuler";
+"열기 · 복사" = "Ouvrir · copier";

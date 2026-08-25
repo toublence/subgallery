@@ -1,11 +1,22 @@
+import CoreImage
 import SwiftData
 import UIKit
 import UserNotifications
+import Vision
 import XCTest
 @testable import SubGallery
 
 @MainActor
 final class CoreFeatureTests: XCTestCase {
+    private enum QRTestScene: Equatable {
+        case large
+        case busy
+        case small
+        case tilted
+        case code128
+        case ordinary
+    }
+
     private func makeContainer() throws -> ModelContainer {
         let schema = Schema([MediaItem.self, Album.self, CapturePreset.self])
         let configuration = ModelConfiguration(
@@ -19,6 +30,148 @@ final class CoreFeatureTests: XCTestCase {
     override func setUp() {
         super.setUp()
         PurchaseManager.shared.configureForTesting(productIDs: [])
+    }
+
+    private func receiptAnalysis() -> MediaAnalysisResult {
+        let date = Date(timeIntervalSince1970: 1_787_184_000)
+        return MediaAnalysisResult(
+            text: "Coffee Shop\nRECEIPT\n2026-08-20\nCARD APPROVED\nTOTAL $12.34",
+            urls: [],
+            phoneNumbers: [],
+            addresses: [],
+            dates: [date],
+            hasQRCode: false,
+            qrCodes: [],
+            receiptMerchant: "Coffee Shop",
+            receiptAmount: "$12.34",
+            textLineCount: 5,
+            textCoverage: 0.16
+        )
+    }
+
+    private func ordinaryAnalysis() -> MediaAnalysisResult {
+        MediaAnalysisResult(
+            text: "Family picnic at the beach",
+            urls: [],
+            phoneNumbers: [],
+            addresses: [],
+            dates: [],
+            hasQRCode: false,
+            qrCodes: [],
+            receiptMerchant: "Family picnic at the beach",
+            receiptAmount: "",
+            textLineCount: 1,
+            textCoverage: 0.03
+        )
+    }
+
+    private func qrAnalysis(_ qrCodes: [String], hasQRCode: Bool? = nil) -> MediaAnalysisResult {
+        MediaAnalysisResult(
+            text: "",
+            urls: qrCodes.filter { $0.hasPrefix("http://") || $0.hasPrefix("https://") },
+            phoneNumbers: [],
+            addresses: [],
+            dates: [],
+            hasQRCode: hasQRCode ?? !qrCodes.isEmpty,
+            qrCodes: qrCodes,
+            receiptMerchant: "",
+            receiptAmount: "",
+            textLineCount: 0,
+            textCoverage: 0
+        )
+    }
+
+    private func generatedSymbol(
+        filterName: String,
+        payload: String,
+        targetLongestEdge: CGFloat
+    ) throws -> UIImage {
+        let filter = try XCTUnwrap(CIFilter(name: filterName))
+        filter.setValue(Data(payload.utf8), forKey: "inputMessage")
+        if filterName == "CIQRCodeGenerator" {
+            filter.setValue("H", forKey: "inputCorrectionLevel")
+        }
+        let output = try XCTUnwrap(filter.outputImage)
+        let longestEdge = max(output.extent.width, output.extent.height)
+        let integerScale = max(1, floor(targetLongestEdge / longestEdge))
+        let scaled = output.transformed(
+            by: CGAffineTransform(scaleX: integerScale, y: integerScale)
+        )
+        let cgImage = try XCTUnwrap(CIContext().createCGImage(scaled, from: scaled.extent))
+        return UIImage(cgImage: cgImage)
+    }
+
+    private func qrVisionTestImage(scene: QRTestScene, payload: String) throws -> UIImage {
+        let size = CGSize(width: 1200, height: 900)
+        let targetLongestEdge: CGFloat = switch scene {
+        case .large: 650
+        case .busy: 280
+        case .small: 105
+        case .tilted: 360
+        case .code128: 860
+        case .ordinary: 1
+        }
+        let symbol = try generatedSymbol(
+            filterName: scene == .code128 ? "CICode128BarcodeGenerator" : "CIQRCodeGenerator",
+            payload: payload,
+            targetLongestEdge: targetLongestEdge
+        )
+        return UIGraphicsImageRenderer(size: size).image { renderer in
+            let context = renderer.cgContext
+            context.interpolationQuality = .none
+            UIColor(white: 0.96, alpha: 1).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+
+            if scene == .busy {
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.monospacedSystemFont(ofSize: 32, weight: .medium),
+                    .foregroundColor: UIColor.darkGray
+                ]
+                for row in 0..<18 {
+                    NSString(string: "LOTTO  \(row + 1)   03  11  18  27  39  42")
+                        .draw(at: CGPoint(x: 28, y: 24 + row * 46), withAttributes: attributes)
+                }
+            } else if scene == .ordinary {
+                UIColor.systemTeal.setFill()
+                context.fill(CGRect(x: 80, y: 100, width: 1040, height: 520))
+                NSString(string: "SubGallery Photo").draw(
+                    at: CGPoint(x: 330, y: 700),
+                    withAttributes: [
+                        .font: UIFont.systemFont(ofSize: 54, weight: .bold),
+                        .foregroundColor: UIColor.black
+                    ]
+                )
+                return
+            }
+
+            if scene == .code128 {
+                let rect = CGRect(
+                    x: (size.width - symbol.size.width) / 2,
+                    y: (size.height - symbol.size.height) / 2,
+                    width: symbol.size.width,
+                    height: symbol.size.height
+                )
+                UIColor.white.setFill()
+                context.fill(rect.insetBy(dx: -30, dy: -30))
+                symbol.draw(in: rect)
+                return
+            }
+
+            let side = symbol.size.width
+            let center = scene == .busy ? CGPoint(x: 1015, y: 690) : CGPoint(x: 600, y: 450)
+            let rect = CGRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side)
+            let quietZone = max(16, side * 0.12)
+            context.saveGState()
+            if scene == .tilted {
+                context.translateBy(x: center.x, y: center.y)
+                context.rotate(by: .pi / 16)
+                context.translateBy(x: -center.x, y: -center.y)
+            }
+            UIColor.white.setFill()
+            context.fill(rect.insetBy(dx: -quietZone, dy: -quietZone))
+            symbol.draw(in: rect)
+            context.restoreGState()
+        }
     }
 
     func testUntilCompletePersistsCompletesAndRestores() async throws {
@@ -107,18 +260,13 @@ final class CoreFeatureTests: XCTestCase {
     func testFreeUserCannotRunPremiumBackfillOrUsePremiumPreset() async throws {
         let container = try makeContainer()
         let context = container.mainContext
-        let album = Album(name: "Receipt", defaultRetention: .thirtyDays)
-        album.purpose = .receipt
-        album.isBuiltIn = true
-        context.insert(album)
-        let preset = CapturePreset(name: "Receipt", albumID: album.id)
+        let preset = CapturePreset(name: "Receipt")
         preset.purpose = .receipt
         context.insert(preset)
 
         let result = await PremiumBackfillService.run(in: context)
 
         XCTAssertEqual(result, PremiumBackfillResult())
-        XCTAssertFalse(album.smartRuleEnabled)
         XCTAssertFalse(CapturePresetService.canUse(preset))
     }
 
@@ -135,8 +283,9 @@ final class CoreFeatureTests: XCTestCase {
 
         XCTAssertEqual(result.analyzedFromStoredText, 1)
         XCTAssertEqual(result.enqueuedForOCR, 0)
-        XCTAssertEqual(item.suggestedPurpose, .receipt)
-        XCTAssertEqual(item.classificationStatus, .suggested)
+        XCTAssertEqual(item.templatePurpose, .receipt)
+        XCTAssertNil(item.albumID)
+        XCTAssertEqual(item.classificationStatus, .applied)
         XCTAssertFalse(item.receiptMerchant.isEmpty)
         XCTAssertFalse(item.receiptAmount.isEmpty)
         XCTAssertEqual(item.premiumAnalysisVersion, PremiumBackfillService.currentVersion)
@@ -150,30 +299,55 @@ final class CoreFeatureTests: XCTestCase {
         album.purpose = .receipt
         album.isBuiltIn = true
         context.insert(album)
+        let item = MediaItem(
+            kind: .photo,
+            source: .camera,
+            localPath: "Media/legacy-receipt.jpg",
+            albumID: album.id
+        )
+        context.insert(item)
 
         await PremiumBackfillService.run(in: context)
         await PremiumBackfillService.run(in: context)
+        let albums = try context.fetch(FetchDescriptor<Album>())
         let presets = try context.fetch(FetchDescriptor<CapturePreset>())
 
-        XCTAssertTrue(album.smartRuleEnabled)
+        XCTAssertTrue(albums.isEmpty)
+        XCTAssertNil(item.albumID)
+        XCTAssertEqual(item.templatePurpose, .receipt)
         XCTAssertEqual(presets.filter { $0.isBuiltIn && $0.purpose == .receipt }.count, 1)
     }
 
-    func testExistingTemplateGetsMissingPresetWhenAddedAgain() throws {
+    func testLegacyTemplateMigrationPreservesSameNamedUserAlbum() throws {
         let container = try makeContainer()
         let context = container.mainContext
-        PurchaseManager.shared.configureForTesting(productIDs: [PurchaseManager.yearlyID])
-        let album = Album(name: "Document")
-        album.purpose = .document
-        album.isBuiltIn = true
-        context.insert(album)
+        let legacy = Album(name: "Receipt", defaultRetention: .thirtyDays)
+        legacy.purpose = .receipt
+        legacy.isBuiltIn = true
+        context.insert(legacy)
+        let userAlbum = Album(name: "영수증")
+        context.insert(userAlbum)
+        let item = MediaItem(
+            kind: .photo,
+            source: .camera,
+            localPath: "Media/migrated.jpg",
+            albumID: legacy.id
+        )
+        context.insert(item)
+        let preset = CapturePreset(name: "Receipt", albumID: legacy.id)
+        preset.purpose = .receipt
+        preset.isBuiltIn = true
+        context.insert(preset)
 
-        let returned = CapturePresetService.addTemplate(.document, in: context)
-        let presets = try context.fetch(FetchDescriptor<CapturePreset>())
+        CapturePresetService.migrateLegacyTemplateAlbums(in: context)
 
-        XCTAssertEqual(returned.id, album.id)
-        XCTAssertTrue(album.smartRuleEnabled)
-        XCTAssertEqual(presets.filter { $0.purpose == .document }.count, 1)
+        let albums = try context.fetch(FetchDescriptor<Album>())
+        XCTAssertEqual(albums.map(\.id), [userAlbum.id])
+        XCTAssertFalse(userAlbum.isBuiltIn)
+        XCTAssertNil(item.albumID)
+        XCTAssertEqual(item.templatePurpose, .receipt)
+        XCTAssertEqual(item.classificationStatus, .applied)
+        XCTAssertNil(preset.albumID)
     }
 
     func testSubscriptionExpirationPreservesButLocksPresetAndCloudSync() throws {
@@ -203,5 +377,223 @@ final class CoreFeatureTests: XCTestCase {
         PurchaseManager.shared.configureForTesting(productIDs: [PurchaseManager.yearlyID])
         XCTAssertTrue(PurchaseManager.shared.isPremium)
         XCTAssertTrue(PremiumAccess.isActive)
+    }
+
+    func testTemplateClassificationCase1AppliesReceiptWithoutCreatingAlbum() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        CapturePresetService.seedBuiltIns(in: context)
+        let item = MediaItem(kind: .photo, source: .camera, localPath: "Media/receipt-1.jpg")
+        context.insert(item)
+
+        SmartClassificationService.evaluate(
+            receiptAnalysis(),
+            for: item,
+            in: context,
+            postsSuggestionNotification: false
+        )
+
+        let albums = try context.fetch(FetchDescriptor<Album>())
+        XCTAssertFalse(PremiumAccess.isActive)
+        XCTAssertTrue(albums.isEmpty)
+        XCTAssertNil(item.albumID)
+        XCTAssertEqual(item.templatePurpose, .receipt)
+        XCTAssertFalse(item.isUnclassified)
+        XCTAssertEqual(item.expirationType, .thirtyDays)
+        XCTAssertEqual(item.classificationStatus, .applied)
+        XCTAssertEqual(item.receiptMerchant, "Coffee Shop")
+        XCTAssertEqual(item.receiptAmount, "$12.34")
+        XCTAssertNotNil(item.receiptDate)
+        let templateItems = try context.fetch(FetchDescriptor<MediaItem>()).filter {
+            $0.templatePurpose == .receipt && $0.deletedAt == nil
+        }
+        XCTAssertEqual(templateItems.map(\.id), [item.id])
+    }
+
+    func testTemplateClassificationCase4UserAlbumRemainsIndependent() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        CapturePresetService.seedBuiltIns(in: context)
+        let album = Album(name: "업무")
+        context.insert(album)
+        let item = MediaItem(kind: .photo, source: .photos, localPath: "Media/work.jpg", albumID: album.id)
+        item.purpose = album.purpose
+        context.insert(item)
+
+        let albums = try context.fetch(FetchDescriptor<Album>())
+        XCTAssertEqual(albums.map(\.id), [album.id])
+        XCTAssertFalse(album.isBuiltIn)
+        XCTAssertEqual(item.albumID, album.id)
+        XCTAssertNil(item.templatePurpose)
+    }
+
+    func testTemplateClassificationCase3DetectsAndAppliesActualQR() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let payload = "https://example.com/subgallery"
+        let qrCodes = [try XCTUnwrap(OCRService.qrPayload(symbology: .qr, payload: payload))]
+        let result = qrAnalysis(qrCodes)
+        let item = MediaItem(kind: .photo, source: .camera, localPath: "Media/qr.jpg")
+        item.detectedQRCodes = result.qrCodes
+        item.detectedURLs = result.urls
+        context.insert(item)
+        SmartClassificationService.evaluate(result, for: item, in: context, postsSuggestionNotification: false)
+
+        XCTAssertTrue(try context.fetch(FetchDescriptor<Album>()).isEmpty)
+        XCTAssertNil(item.albumID)
+        XCTAssertEqual(item.templatePurpose, .qr)
+        XCTAssertFalse(item.isUnclassified)
+        XCTAssertEqual(item.expirationType, .sevenDays)
+        XCTAssertEqual(item.classificationStatus, .applied)
+        XCTAssertEqual(item.detectedQRCodes, [payload])
+        XCTAssertEqual(item.detectedURLs, [payload])
+        XCTAssertEqual(
+            try context.fetch(FetchDescriptor<MediaItem>()).filter { $0.templatePurpose == .qr }.count,
+            1
+        )
+    }
+
+    func testQRVisionPipelineCases1Through6() async throws {
+        let cases: [(QRTestScene, Bool, String)] = [
+            (.large, true, "CASE 1 large QR"),
+            (.busy, true, "CASE 2 busy lottery-style QR"),
+            (.small, true, "CASE 3 small QR"),
+            (.tilted, true, "CASE 4 tilted QR"),
+            (.code128, false, "CASE 5 Code128 only"),
+            (.ordinary, false, "CASE 6 ordinary photo")
+        ]
+        let container = try makeContainer()
+        let context = container.mainContext
+        var newestQRItemID: UUID?
+
+        for (index, testCase) in cases.enumerated() {
+            let payload = "https://example.com/subgallery/qr/\(index + 1)"
+            let image = try qrVisionTestImage(scene: testCase.0, payload: payload)
+            let url = FileManager.default.temporaryDirectory
+                .appending(path: "qr-vision-\(UUID().uuidString).png")
+            try XCTUnwrap(image.pngData()).write(to: url)
+            defer { try? FileManager.default.removeItem(at: url) }
+
+            let result = try await OCRService.shared.analyze(at: url)
+            XCTAssertEqual(result.hasQRCode, testCase.1, testCase.2)
+
+            let item = MediaItem(
+                kind: .photo,
+                source: index.isMultiple(of: 2) ? .camera : .photos,
+                localPath: "Media/qr-case-\(index).png",
+                createdAt: Date(timeIntervalSince1970: TimeInterval(index + 1))
+            )
+            item.detectedQRCodes = result.qrCodes
+            item.detectedURLs = result.urls
+            context.insert(item)
+            SmartClassificationService.evaluate(
+                result,
+                for: item,
+                in: context,
+                postsSuggestionNotification: false
+            )
+
+            XCTAssertNil(item.albumID, testCase.2)
+            if testCase.1 {
+                XCTAssertEqual(item.templatePurpose, .qr, testCase.2)
+                XCTAssertEqual(item.classificationStatus, .applied, testCase.2)
+                XCTAssertFalse(item.isUnclassified, testCase.2)
+                XCTAssertTrue(item.detectedQRCodes.contains(payload), testCase.2)
+                newestQRItemID = item.id
+            } else {
+                XCTAssertNil(item.templatePurpose, testCase.2)
+                XCTAssertEqual(item.classificationStatus, .none, testCase.2)
+                XCTAssertTrue(item.isUnclassified, testCase.2)
+            }
+        }
+
+        let templateItems = try context.fetch(
+            FetchDescriptor<MediaItem>(sortBy: [SortDescriptor(\.createdAt, order: .reverse)])
+        ).filter { $0.deletedAt == nil && $0.templatePurpose == .qr }
+        XCTAssertEqual(templateItems.count, 4)
+        XCTAssertEqual(templateItems.first?.id, newestQRItemID)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<Album>()).isEmpty)
+    }
+
+    func testTemplateClassificationCase2LeavesOrdinaryPhotoUnclassified() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let item = MediaItem(kind: .photo, source: .camera, localPath: "Media/photo.jpg")
+        context.insert(item)
+
+        SmartClassificationService.evaluate(
+            ordinaryAnalysis(),
+            for: item,
+            in: context,
+            postsSuggestionNotification: false
+        )
+
+        XCTAssertNil(item.albumID)
+        XCTAssertEqual(item.purpose, .general)
+        XCTAssertTrue(item.isUnclassified)
+        XCTAssertEqual(item.classificationStatus, .none)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<Album>()).isEmpty)
+
+        let ambiguous = MediaAnalysisResult(
+            text: "Project Alpha\nQuarterly TOTAL 1200\nNotes\nAppendix",
+            urls: [],
+            phoneNumbers: [],
+            addresses: [],
+            dates: [],
+            hasQRCode: false,
+            qrCodes: [],
+            receiptMerchant: "Project Alpha",
+            receiptAmount: "1200",
+            textLineCount: 4,
+            textCoverage: 0.14
+        )
+        let ambiguousItem = MediaItem(kind: .photo, source: .photos, localPath: "Media/ambiguous.jpg")
+        context.insert(ambiguousItem)
+        SmartClassificationService.evaluate(
+            ambiguous,
+            for: ambiguousItem,
+            in: context,
+            postsSuggestionNotification: false
+        )
+        XCTAssertNil(ambiguousItem.albumID)
+        XCTAssertEqual(ambiguousItem.classificationStatus, .none)
+    }
+
+    func testAutomaticClassificationCase5DoesNotTreatCode128AsQR() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        XCTAssertNil(OCRService.qrPayload(symbology: .code128, payload: "123456789012"))
+        let result = qrAnalysis([])
+        let item = MediaItem(kind: .photo, source: .camera, localPath: "Media/barcode.jpg")
+        context.insert(item)
+        SmartClassificationService.evaluate(result, for: item, in: context, postsSuggestionNotification: false)
+
+        XCTAssertNil(item.albumID)
+        XCTAssertEqual(item.classificationStatus, .none)
+        XCTAssertFalse(try context.fetch(FetchDescriptor<Album>()).contains { $0.purpose == .qr })
+    }
+
+    func testAutomaticClassificationUndoRestoresUnclassifiedStateAndRetention() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let item = MediaItem(kind: .photo, source: .photos, localPath: "Media/undo.jpg")
+        item.recognizedText = receiptAnalysis().text
+        RetentionService.apply(.today, to: item)
+        let originalExpiration = item.expirationDate
+        context.insert(item)
+        SmartClassificationService.evaluate(
+            receiptAnalysis(),
+            for: item,
+            in: context,
+            postsSuggestionNotification: false
+        )
+
+        XCTAssertTrue(SmartClassificationService.undoAutomaticClassification(item, in: context))
+        XCTAssertNil(item.albumID)
+        XCTAssertEqual(item.purpose, .general)
+        XCTAssertEqual(item.expirationType, .today)
+        XCTAssertEqual(item.expirationDate, originalExpiration)
+        XCTAssertEqual(item.classificationStatus, .dismissed)
+        XCTAssertFalse(item.recognizedText.isEmpty)
     }
 }

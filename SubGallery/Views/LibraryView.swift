@@ -35,6 +35,7 @@ enum SmartAlbum: String, Hashable {
 enum AlbumDestination: Hashable {
     case smart(SmartAlbum)
     case user(UUID, String)
+    case template(CapturePurpose)
 }
 
 struct LibraryView: View {
@@ -77,7 +78,7 @@ struct LibraryView: View {
     @State private var retentionAlbum: Album?
     @State private var rulesAlbum: Album?
     @State private var classificationItem: MediaItem?
-    @State private var showsTemplates = false
+    @State private var automaticClassificationNotice: SmartClassificationService.AutomaticClassificationNotice?
     @State private var showsCleanupCenter = false
     @State private var albumPendingDeletion: Album?
     @State private var navigationPath: [AlbumDestination] = {
@@ -101,7 +102,7 @@ struct LibraryView: View {
     }
 
     private var userAlbums: [Album] {
-        albums
+        albums.filter { !$0.isBuiltIn }
     }
 
     var body: some View {
@@ -183,9 +184,6 @@ struct LibraryView: View {
                         Label(L10n.text("새 앨범"), systemImage: "plus")
                     }
                     Menu {
-                        Button { showsTemplates = true } label: {
-                            Label(L10n.text("템플릿 추가"), systemImage: "square.grid.2x2")
-                        }
                         NavigationLink(value: AlbumDestination.smart(.recentlyDeleted)) {
                             Label(L10n.text("최근 삭제"), systemImage: "trash")
                         }
@@ -232,8 +230,25 @@ struct LibraryView: View {
                 }
                 classificationItem = item
             }
+            .onReceive(NotificationCenter.default.publisher(for: .automaticClassificationApplied)) { notification in
+                guard !isCameraPresented,
+                      let notice = notification.object as? SmartClassificationService.AutomaticClassificationNotice else {
+                    return
+                }
+                showAutomaticClassificationNotice(notice)
+            }
             .onChange(of: isCameraPresented) { _, isPresented in
                 if !isPresented { requestReviewIfAppropriate() }
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let notice = automaticClassificationNotice {
+                AutomaticClassificationBanner(notice: notice) {
+                    undoAutomaticClassification(notice)
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 88)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .alert(L10n.text("새 앨범"), isPresented: $showsNewAlbum) {
@@ -304,13 +319,6 @@ struct LibraryView: View {
         .sheet(item: $classificationItem) { item in
             SmartClassificationSuggestionView(item: item)
                 .presentationDetents([.medium, .large])
-        }
-        .sheet(isPresented: $showsTemplates) {
-            AlbumTemplatePickerView {
-                showsTemplates = false
-                showsNewAlbum = true
-            }
-            .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showsCleanupCenter) {
             CleanupCenterView()
@@ -411,14 +419,14 @@ struct LibraryView: View {
 
     @ViewBuilder
     private func templateTile(_ purpose: CapturePurpose) -> some View {
-        Button {
-            let album = CapturePresetService.addTemplate(purpose, in: modelContext)
-            navigationPath.append(.user(album.id, album.displayName))
-        } label: {
+        let templateMedia = media.filter {
+            $0.deletedAt == nil && $0.templatePurpose == purpose
+        }
+        NavigationLink(value: AlbumDestination.template(purpose)) {
             AlbumTile(
                 title: purpose.title,
-                count: 0,
-                cover: nil,
+                count: templateMedia.count,
+                cover: templateMedia.first,
                 symbol: templateSymbol(for: purpose),
                 subtitle: templateFeature(for: purpose)
             )
@@ -432,6 +440,7 @@ struct LibraryView: View {
         case .travel: "airplane"
         case .parking: "car"
         case .document: "doc.text"
+        case .qr: "qrcode"
         default: "folder"
         }
     }
@@ -442,6 +451,7 @@ struct LibraryView: View {
         case .travel: L10n.text("사진 지도")
         case .parking: L10n.text("위치 · 완료")
         case .document: L10n.text("OCR · PDF")
+        case .qr: L10n.text("열기 · 복사")
         default: ""
         }
     }
@@ -498,7 +508,7 @@ struct LibraryView: View {
         case .camera: media.filter { $0.deletedAt == nil && $0.source == .camera }
         case .temporary: media.filter { $0.deletedAt == nil && ($0.expirationDate != nil || $0.waitingForCompletion) }
         case .pinned: media.filter { $0.deletedAt == nil && $0.isPinned }
-        case .unclassified: media.filter { $0.deletedAt == nil && $0.albumID == nil }
+        case .unclassified: media.filter { $0.deletedAt == nil && $0.isUnclassified }
         case .recentlyDeleted: media.filter { $0.deletedAt != nil }
         }
     }
@@ -632,6 +642,47 @@ struct LibraryView: View {
             requestReview()
         }
     }
+
+    private func showAutomaticClassificationNotice(
+        _ notice: SmartClassificationService.AutomaticClassificationNotice
+    ) {
+        withAnimation { automaticClassificationNotice = notice }
+        Task {
+            try? await Task.sleep(for: .seconds(6))
+            guard automaticClassificationNotice?.id == notice.id else { return }
+            withAnimation { automaticClassificationNotice = nil }
+        }
+    }
+
+    private func undoAutomaticClassification(
+        _ notice: SmartClassificationService.AutomaticClassificationNotice
+    ) {
+        _ = SmartClassificationService.undoAutomaticClassification(itemID: notice.itemID, in: modelContext)
+        withAnimation { automaticClassificationNotice = nil }
+    }
+}
+
+struct AutomaticClassificationBanner: View {
+    let notice: SmartClassificationService.AutomaticClassificationNotice
+    let undo: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: notice.purpose == .receipt ? "receipt.fill" : "qrcode")
+                .foregroundStyle(Color.accentColor)
+            Text(L10n.format("%@ 템플릿으로 자동 정리했어요", notice.purpose.title))
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+            Spacer(minLength: 4)
+            Button(L10n.text("실행 취소"), action: undo)
+                .font(.subheadline.weight(.semibold))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().stroke(.separator.opacity(0.2), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.15), radius: 12, y: 5)
+    }
 }
 
 private extension AlbumDestination {
@@ -639,6 +690,7 @@ private extension AlbumDestination {
         switch self {
         case .smart(let smart): "smart:\(smart.rawValue)"
         case .user(let id, _): "album:\(id.uuidString)"
+        case .template(let purpose): "template:\(purpose.rawValue)"
         }
     }
 
@@ -646,6 +698,13 @@ private extension AlbumDestination {
         if persistenceToken.hasPrefix("smart:"),
            let smart = SmartAlbum(rawValue: String(persistenceToken.dropFirst("smart:".count))) {
             self = .smart(smart)
+            return
+        }
+        if persistenceToken.hasPrefix("template:"),
+           let purpose = CapturePurpose(
+               rawValue: String(persistenceToken.dropFirst("template:".count))
+           ), purpose != .general, purpose != .custom {
+            self = .template(purpose)
             return
         }
         let rawID = persistenceToken.hasPrefix("album:")
@@ -991,74 +1050,6 @@ struct CleanupCenterView: View {
     }
 }
 
-struct AlbumTemplatePickerView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Album.sortOrder) private var albums: [Album]
-    let createCustom: () -> Void
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    ForEach(CapturePresetService.templatePurposes) { purpose in
-                        Button {
-                            _ = CapturePresetService.addTemplate(purpose, in: modelContext)
-                            dismiss()
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: templateSymbol(for: purpose))
-                                    .frame(width: 28)
-                                    .foregroundStyle(Color.accentColor)
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(purpose.title).foregroundStyle(.primary)
-                                    Text(SmartClassificationService.defaultRetention(for: purpose).title)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if albums.contains(where: { $0.purpose == purpose }) {
-                                    Text(L10n.text("추가됨"))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .disabled(albums.contains(where: { $0.purpose == purpose }))
-                    }
-                    Button {
-                        dismiss()
-                        createCustom()
-                    } label: {
-                        Label(L10n.text("직접 만들기"), systemImage: "plus")
-                    }
-                } footer: {
-                    Text(L10n.text("템플릿은 앨범과 기본 보관 기간을 함께 설정합니다."))
-                }
-            }
-            .navigationTitle(L10n.text("템플릿 추가"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(L10n.text("닫기")) { dismiss() }
-                }
-            }
-        }
-    }
-
-    private func templateSymbol(for purpose: CapturePurpose) -> String {
-        switch purpose {
-        case .receipt: "receipt"
-        case .travel: "airplane"
-        case .parking: "car"
-        case .document: "doc.text"
-        case .qr: "qrcode"
-        case .temporary: "clock"
-        default: "folder"
-        }
-    }
-}
-
 struct SmartClassificationSuggestionView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -1160,15 +1151,17 @@ struct SmartClassificationSuggestionView: View {
     }
 
     private func applySuggestion() {
-        let album: Album?
         if let id = UUID(uuidString: albumSelection) {
-            album = albums.first { $0.id == id }
+            let album = albums.first { $0.id == id }
+            SmartClassificationService.apply(item, album: album, retention: retention, in: modelContext)
         } else if albumSelection == "suggested" {
-            album = CapturePresetService.addTemplate(suggestedPurpose, in: modelContext)
+            SmartClassificationService.apply(item, album: nil, retention: retention, in: modelContext)
         } else {
-            album = nil
+            item.albumID = nil
+            item.templatePurpose = nil
+            RetentionService.apply(retention, to: item)
+            SmartClassificationService.dismiss(item, in: modelContext)
         }
-        SmartClassificationService.apply(item, album: album, retention: retention, in: modelContext)
         dismiss()
     }
 }

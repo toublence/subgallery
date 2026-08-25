@@ -21,6 +21,7 @@ struct CameraView: View {
     @State private var showsAlbumCoachMark = false
     @State private var showsRetentionCoachMark = false
     @State private var classificationItem: MediaItem?
+    @State private var automaticClassificationNotice: SmartClassificationService.AutomaticClassificationNotice?
     @AppStorage("storage.defaultRetention") private var defaultRetentionRaw = RetentionPolicy.forever.rawValue
     @AppStorage("storage.defaultRetentionDate") private var defaultRetentionDate = 0.0
     @AppStorage("camera.lastMode") private var lastMode = MediaKind.photo.rawValue
@@ -82,6 +83,16 @@ struct CameraView: View {
 
     var body: some View {
         cameraWithPersistence
+            .overlay(alignment: .bottom) {
+                if let notice = automaticClassificationNotice {
+                    AutomaticClassificationBanner(notice: notice) {
+                        undoAutomaticClassification(notice)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 112)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
             .alert(L10n.text("마이크 접근이 필요합니다."), isPresented: $camera.needsMicrophoneSettings) {
                 Button(L10n.text("취소"), role: .cancel) { }
                 Button(L10n.text("설정 열기"), action: openAppSettings)
@@ -101,6 +112,11 @@ struct CameraView: View {
                           classificationItem == nil else { return }
                     classificationItem = item
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .automaticClassificationApplied)) { notification in
+                guard let notice = notification.object as? SmartClassificationService.AutomaticClassificationNotice,
+                      lastCapture?.id == notice.itemID else { return }
+                showAutomaticClassificationNotice(notice)
             }
             .sheet(item: $classificationItem) { item in
                 SmartClassificationSuggestionView(item: item)
@@ -565,6 +581,24 @@ struct CameraView: View {
         if !albumCoachMarkSeen && !PremiumAccess.isActive {
             showsAlbumCoachMark = true
         }
+    }
+
+    private func showAutomaticClassificationNotice(
+        _ notice: SmartClassificationService.AutomaticClassificationNotice
+    ) {
+        withAnimation { automaticClassificationNotice = notice }
+        Task {
+            try? await Task.sleep(for: .seconds(6))
+            guard automaticClassificationNotice?.id == notice.id else { return }
+            withAnimation { automaticClassificationNotice = nil }
+        }
+    }
+
+    private func undoAutomaticClassification(
+        _ notice: SmartClassificationService.AutomaticClassificationNotice
+    ) {
+        _ = SmartClassificationService.undoAutomaticClassification(itemID: notice.itemID, in: modelContext)
+        withAnimation { automaticClassificationNotice = nil }
     }
 
     private func applyDestinationRetention() {

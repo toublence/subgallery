@@ -15,6 +15,7 @@ extension Notification.Name {
     static let openReminderMedia = Notification.Name("openReminderMedia")
     static let replayOnboarding = Notification.Name("replayOnboarding")
     static let smartClassificationSuggested = Notification.Name("smartClassificationSuggested")
+    static let automaticClassificationApplied = Notification.Name("automaticClassificationApplied")
     static let premiumEntitlementDidChange = Notification.Name("premiumEntitlementDidChange")
     static let premiumBackfillRequested = Notification.Name("premiumBackfillRequested")
 }
@@ -461,10 +462,7 @@ struct SubGalleryApp: App {
         case "camera":
             isCameraPresented = true
         case "albums":
-            let albums = (try? dataStore.container.mainContext.fetch(FetchDescriptor<Album>())) ?? []
-            if let travel = albums.first(where: { $0.purpose == .travel }) {
-                requestedLibraryDestination = .user(travel.id, travel.displayName)
-            }
+            requestedLibraryDestination = .template(.travel)
         case "batch":
             requestedLibraryDestination = .smart(.all)
         case "retention":
@@ -477,7 +475,6 @@ struct SubGalleryApp: App {
     @MainActor
     private func prepareStoreScreenshotFixture() async {
         let context = dataStore.container.mainContext
-        let albums = (try? context.fetch(FetchDescriptor<Album>())) ?? []
         let calendar = Calendar(identifier: .gregorian)
         let baseDate = calendar.date(from: DateComponents(year: 2026, month: 8, day: 20, hour: 10)) ?? .now
         let names = localizedStoreFixtureNames()
@@ -501,7 +498,6 @@ struct SubGalleryApp: App {
                     type: .jpeg,
                     preferredName: "__StoreShot_\(index + 1).jpg"
                   ) else { continue }
-            let album = albums.first { $0.purpose == fixture.3 }
             let item = MediaItem(
                 kind: .photo,
                 source: fixture.4,
@@ -509,7 +505,6 @@ struct SubGalleryApp: App {
                 thumbnailPath: stored.thumbnailRelativePath,
                 fileName: "\(fixture.0).jpg",
                 createdAt: calendar.date(byAdding: .hour, value: index * 7, to: baseDate) ?? baseDate,
-                albumID: album?.id,
                 fileSize: stored.fileSize,
                 width: stored.width,
                 height: stored.height
@@ -520,7 +515,6 @@ struct SubGalleryApp: App {
             item.ocrStatus = .completed
             item.recognizedText = fixture.0
             context.insert(item)
-            if album?.coverMediaID == nil { album?.coverMediaID = item.id }
         }
         try? context.save()
     }
@@ -728,19 +722,14 @@ struct SubGalleryApp: App {
 }
 
 private struct StoreAlbumScreenshotHost: View {
-    @Query(sort: \Album.sortOrder) private var albums: [Album]
     @Binding var isCameraPresented: Bool
 
     var body: some View {
-        if let travel = albums.first(where: { $0.purpose == .travel }) {
-            NavigationStack {
-                AlbumView(
-                    destination: .user(travel.id, travel.displayName),
-                    isCameraPresented: $isCameraPresented
-                )
-            }
-        } else {
-            ProgressView()
+        NavigationStack {
+            AlbumView(
+                destination: .template(.travel),
+                isCameraPresented: $isCameraPresented
+            )
         }
     }
 }
