@@ -29,6 +29,7 @@ struct SettingsView: View {
     @State private var showsPINSetup = false
     @State private var showsPINVerification = false
     @State private var showsPremium = false
+    @State private var premiumEntryPoint = PremiumEntryPoint.general
     @State private var iCloudError: String?
 
     private let retentionOptions: [RetentionPolicy] = [
@@ -109,7 +110,10 @@ struct SettingsView: View {
                     if purchases.isPremium {
                         NavigationLink(L10n.text("촬영 프리셋")) { CapturePresetListView() }
                     } else {
-                        Button { showsPremium = true } label: {
+                        Button {
+                            premiumEntryPoint = .capturePreset
+                            showsPremium = true
+                        } label: {
                             HStack {
                                 Text(L10n.text("촬영 프리셋"))
                                 Spacer()
@@ -184,7 +188,10 @@ struct SettingsView: View {
                 }
             }
             .sheet(isPresented: $showsPremium) {
-                PremiumView().presentationDetents([.large])
+                PremiumView(entryPoint: premiumEntryPoint).presentationDetents([.large])
+            }
+            .onChange(of: purchases.isPremium) { _, isPremium in
+                if isPremium, showsPremium { showsPremium = false }
             }
             .alert(L10n.text("iCloud를 사용할 수 없음"), isPresented: Binding(
                 get: { iCloudError != nil },
@@ -222,6 +229,7 @@ struct SettingsView: View {
             get: { stripsMetadata },
             set: { enabled in
                 guard !enabled || purchases.isPremium else {
+                    premiumEntryPoint = .privacyExport
                     showsPremium = true
                     return
                 }
@@ -295,6 +303,7 @@ struct SettingsView: View {
             set: { enabled in
                 if enabled {
                     guard purchases.isPremium else {
+                        premiumEntryPoint = .iCloudSync
                         showsPremium = true
                         return
                     }

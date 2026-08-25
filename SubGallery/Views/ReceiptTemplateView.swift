@@ -450,6 +450,7 @@ struct ReceiptTemplateView: View {
         ) {
             showsReport = true
         } else {
+            PremiumAnalytics.limitReached(.receiptReport)
             showsPremium = true
         }
     }

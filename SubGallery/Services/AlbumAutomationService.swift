@@ -29,12 +29,16 @@ enum AlbumAutomationService {
     /// Whether the nightly sweep may move this item on its own. An album set to
     /// finish manually keeps its expired photos visible until the user completes
     /// them; pinned photos are never swept, which the retention rules already ensure.
-    static func allowsAutomaticCleanup(_ item: MediaItem, albums: [Album]) -> Bool {
+    static func allowsAutomaticCleanup(
+        _ item: MediaItem,
+        albums: [Album],
+        isPremium: Bool = PremiumAccess.isActive
+    ) -> Bool {
         guard let albumID = item.albumID else { return true }
         guard let album = albums.first(where: { $0.id == albumID }) else { return true }
         // Templates keep their own behaviour; only user albums opt out.
         guard album.purpose == .custom else { return true }
-        return album.autoCleanupEnabled
+        return isPremium && album.autoCleanupEnabled
     }
 
     // MARK: - Summary
@@ -103,8 +107,10 @@ enum AlbumAutomationService {
         for album: Album,
         media: [MediaItem],
         now: Date = .now,
-        agedOutAfterDays: Int = 30
+        agedOutAfterDays: Int = 30,
+        isPremium: Bool = PremiumAccess.isActive
     ) -> CleanupSuggestions {
+        guard isPremium else { return CleanupSuggestions() }
         let calendar = Calendar.current
         let agedOutBefore = calendar.date(byAdding: .day, value: -agedOutAfterDays, to: now) ?? now
         let soonLimit = calendar.date(byAdding: .day, value: 7, to: now) ?? now

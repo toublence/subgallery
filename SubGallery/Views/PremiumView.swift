@@ -1,3 +1,4 @@
+import FirebaseAnalytics
 import StoreKit
 import SwiftUI
 
@@ -100,6 +101,7 @@ final class PurchaseManager: ObservableObject {
 
     func purchase(_ product: Product) async {
         guard canMakePayments, !isPurchasing else { return }
+        PremiumAnalytics.purchaseStarted(productID: product.id)
         isPurchasing = true
         defer { isPurchasing = false }
 
@@ -113,6 +115,7 @@ final class PurchaseManager: ObservableObject {
                 await transaction.finish()
                 await refreshEntitlements()
                 if isPremium {
+                    PremiumAnalytics.purchaseSucceeded(productID: product.id)
                     NotificationCenter.default.post(name: .premiumBackfillRequested, object: nil)
                 }
                 message = L10n.text("구매가 완료되었습니다.")
@@ -137,6 +140,7 @@ final class PurchaseManager: ObservableObject {
             try await AppStore.sync()
             await refreshEntitlements()
             if isPremium {
+                PremiumAnalytics.restoreSucceeded()
                 NotificationCenter.default.post(name: .premiumBackfillRequested, object: nil)
             }
             message = isPremium
@@ -182,11 +186,281 @@ final class PurchaseManager: ObservableObject {
     #endif
 }
 
-enum PremiumEntryPoint {
+enum PremiumEntryPoint: String {
     case general
     case receiptReport
+    case travelMap
     case documentBuilder
     case qrBuilder
+    case albumAutomation
+    case cleanupCenter
+    case iCloudSync
+    case capturePreset
+    case privacyExport
+    case ocrSmartActions
+
+    var featureID: PremiumFeatureID? {
+        switch self {
+        case .general: nil
+        case .receiptReport: .receiptReport
+        case .travelMap: .travelMap
+        case .documentBuilder: .documentBuilder
+        case .qrBuilder: .qrBuilder
+        case .albumAutomation: .advancedAlbumAutomation
+        case .cleanupCenter: .cleanupCenter
+        case .iCloudSync: .iCloudSync
+        case .capturePreset: .capturePresets
+        case .privacyExport: .privacyExport
+        case .ocrSmartActions: .ocrSmartActions
+        }
+    }
+}
+
+enum PremiumFeatureID: String, CaseIterable, Hashable {
+    case receiptReport
+    case travelMap
+    case documentBuilder
+    case qrBuilder
+    case advancedAlbumAutomation
+    case cleanupCenter
+    case iCloudSync
+    case capturePresets
+    case privacyExport
+    case ocrSmartActions
+}
+
+enum PremiumAccessPolicy: Equatable {
+    case free
+    case trial(limit: Int)
+    case premium
+    case freeBasicPremiumAdvanced
+
+    var paywallCaption: String? {
+        switch self {
+        case .free: nil
+        case .trial(let limit): L10n.format("Free %d회 · Premium 무제한", limit)
+        case .premium: L10n.text("Premium 포함")
+        case .freeBasicPremiumAdvanced: L10n.text("Free 기본 · Premium 고급")
+        }
+    }
+}
+
+struct PremiumFeatureDescriptor: Identifiable {
+    let id: PremiumFeatureID
+    let symbol: String
+    let titleKey: String
+    let detailKey: String
+    let accessPolicy: PremiumAccessPolicy
+}
+
+enum FeatureAvailability: Equatable {
+    case included
+    case unavailable
+    case trial(Int)
+    case basic
+    case unlimited
+    case advanced
+
+    var title: String {
+        switch self {
+        case .included: L10n.text("포함")
+        case .unavailable: "—"
+        case .trial(let limit): L10n.format("%d회", limit)
+        case .basic: L10n.text("기본")
+        case .unlimited: L10n.text("무제한")
+        case .advanced: L10n.text("고급")
+        }
+    }
+}
+
+struct PlanComparisonItem: Identifiable {
+    let id: String
+    let titleKey: String
+    let free: FeatureAvailability
+    let premium: FeatureAvailability
+}
+
+struct PremiumBenefitGroup: Identifiable {
+    let id: String
+    let featureIDs: Set<PremiumFeatureID>
+    let symbol: String
+    let titleKey: String
+    let detailKey: String
+}
+
+private struct PremiumPaywallBenefit: Identifiable {
+    let id: String
+    let symbol: String
+    let titleKey: String
+    let detailKey: String
+    let accessCaption: String?
+}
+
+/// Product policy source of truth. Trial counters keep their existing Keychain
+/// stores, while limits, paywall copy and the comparison table read from here.
+enum PremiumFeatureCatalog {
+    static func trialLimit(for id: PremiumFeatureID) -> Int {
+        switch feature(id).accessPolicy {
+        case .trial(let limit): limit
+        default: 0
+        }
+    }
+
+    static func feature(_ id: PremiumFeatureID) -> PremiumFeatureDescriptor {
+        switch id {
+        case .receiptReport:
+            PremiumFeatureDescriptor(
+                id: id, symbol: "chart.bar.xaxis", titleKey: "지출 리포트 무제한",
+                detailKey: "영수증으로 지출 흐름과 결제 패턴을 언제든 다시 확인합니다.",
+                accessPolicy: .trial(limit: 3)
+            )
+        case .travelMap:
+            PremiumFeatureDescriptor(
+                id: id, symbol: "map.fill", titleKey: "여행 지도 무제한",
+                detailKey: "사진 위치와 방문 지역, 여행 타임라인을 연도별로 계속 확인합니다.",
+                accessPolicy: .trial(limit: 5)
+            )
+        case .documentBuilder:
+            PremiumFeatureDescriptor(
+                id: id, symbol: "doc.badge.plus", titleKey: "문서 만들기 무제한",
+                detailKey: "여러 장의 문서 사진을 순서대로 정리해 검색 가능한 PDF로 만듭니다.",
+                accessPolicy: .trial(limit: 3)
+            )
+        case .qrBuilder:
+            PremiumFeatureDescriptor(
+                id: id, symbol: "qrcode", titleKey: "QR 만들기 무제한",
+                detailKey: "Wi-Fi, 연락처, 링크를 QR로 만들어 보관하고 바로 보여줍니다.",
+                accessPolicy: .trial(limit: 5)
+            )
+        case .advancedAlbumAutomation:
+            PremiumFeatureDescriptor(
+                id: id, symbol: "slider.horizontal.3", titleKey: "고급 앨범 자동화",
+                detailKey: "완료된 사진을 자동 정리하고 정리가 필요한 사진을 앨범마다 확인합니다.",
+                accessPolicy: .freeBasicPremiumAdvanced
+            )
+        case .cleanupCenter:
+            PremiumFeatureDescriptor(
+                id: id, symbol: "tray.full.fill", titleKey: "정리 센터",
+                detailKey: "만료 예정과 완료 대기 사진을 한곳에서 빠르게 정리합니다.",
+                accessPolicy: .premium
+            )
+        case .iCloudSync:
+            PremiumFeatureDescriptor(
+                id: id, symbol: "icloud", titleKey: "iCloud 동기화",
+                detailKey: "사진과 동영상을 같은 Apple 계정의 기기 사이에서 동기화합니다.",
+                accessPolicy: .premium
+            )
+        case .capturePresets:
+            PremiumFeatureDescriptor(
+                id: id, symbol: "camera.filters", titleKey: "고급 촬영 프리셋",
+                detailKey: "사용자 정의 저장 위치와 보관·분석 설정을 촬영 프리셋으로 만듭니다.",
+                accessPolicy: .premium
+            )
+        case .privacyExport:
+            PremiumFeatureDescriptor(
+                id: id, symbol: "shield.lefthalf.filled", titleKey: "개인정보 보호 내보내기",
+                detailKey: "위치와 기기 정보를 제거한 사본을 안전하게 내보냅니다.",
+                accessPolicy: .premium
+            )
+        case .ocrSmartActions:
+            PremiumFeatureDescriptor(
+                id: id, symbol: "text.viewfinder", titleKey: "OCR 스마트 작업",
+                detailKey: "사진 속 날짜, 주소와 링크를 인식해 바로 필요한 작업을 실행합니다.",
+                accessPolicy: .premium
+            )
+        }
+    }
+
+    static let generalBenefitGroups: [PremiumBenefitGroup] = [
+        PremiumBenefitGroup(
+            id: "templateTools",
+            featureIDs: [.receiptReport, .travelMap, .documentBuilder, .qrBuilder],
+            symbol: "square.grid.2x2.fill",
+            titleKey: "템플릿 기능 무제한",
+            detailKey: "지출 리포트 · 여행 지도 · 문서 만들기 · QR 만들기를 제한 없이 사용하세요."
+        ),
+        PremiumBenefitGroup(
+            id: "albumAutomation",
+            featureIDs: [.advancedAlbumAutomation],
+            symbol: "slider.horizontal.3",
+            titleKey: "고급 앨범 자동화",
+            detailKey: "사용자가 만든 앨범도 보관·완료·정리 규칙에 따라 자동으로 관리합니다."
+        ),
+        PremiumBenefitGroup(
+            id: "smartManagement",
+            featureIDs: [.cleanupCenter, .ocrSmartActions],
+            symbol: "wand.and.stars",
+            titleKey: "Smart 관리",
+            detailKey: "정리 센터와 사진 속 스마트 작업으로 관리할 사진만 빠르게 확인합니다."
+        ),
+        PremiumBenefitGroup(
+            id: "advancedTools",
+            featureIDs: [.iCloudSync, .capturePresets, .privacyExport],
+            symbol: "icloud.and.arrow.up",
+            titleKey: "동기화와 고급 도구",
+            detailKey: "iCloud, 사용자 촬영 프리셋과 개인정보 보호 내보내기를 사용합니다."
+        )
+    ]
+
+    static let comparisonItems: [PlanComparisonItem] = [
+        PlanComparisonItem(id: "separateStorage", titleKey: "사진 앱과 별도 보관", free: .included, premium: .included),
+        PlanComparisonItem(id: "captureImport", titleKey: "사진/동영상 촬영·가져오기", free: .included, premium: .included),
+        PlanComparisonItem(id: "albums", titleKey: "내 앨범", free: .included, premium: .included),
+        PlanComparisonItem(id: "retention", titleKey: "기본 보관 기간", free: .included, premium: .included),
+        PlanComparisonItem(id: "ocrSearch", titleKey: "OCR 텍스트 검색", free: .included, premium: .included),
+        PlanComparisonItem(id: "receiptRecognition", titleKey: "영수증 자동 인식·정보 추출", free: .included, premium: .included),
+        PlanComparisonItem(id: "qrRecognition", titleKey: "QR 자동 인식", free: .included, premium: .included),
+        PlanComparisonItem(id: "documentScan", titleKey: "문서 스캔", free: .included, premium: .included),
+        PlanComparisonItem(id: "travelLocation", titleKey: "여행 위치 저장", free: .included, premium: .included),
+        PlanComparisonItem(id: "receiptReport", titleKey: "지출 리포트", free: .trial(trialLimit(for: .receiptReport)), premium: .unlimited),
+        PlanComparisonItem(id: "travelMap", titleKey: "여행 지도", free: .trial(trialLimit(for: .travelMap)), premium: .unlimited),
+        PlanComparisonItem(id: "documentBuilder", titleKey: "문서 만들기", free: .trial(trialLimit(for: .documentBuilder)), premium: .unlimited),
+        PlanComparisonItem(id: "qrBuilder", titleKey: "QR 만들기", free: .trial(trialLimit(for: .qrBuilder)), premium: .unlimited),
+        PlanComparisonItem(id: "albumAutomation", titleKey: "앨범 자동화", free: .basic, premium: .advanced),
+        PlanComparisonItem(id: "cleanupCenter", titleKey: "정리 센터", free: .unavailable, premium: .included),
+        PlanComparisonItem(id: "ocrActions", titleKey: "OCR 스마트 작업", free: .unavailable, premium: .included),
+        PlanComparisonItem(id: "icloud", titleKey: "iCloud 동기화", free: .unavailable, premium: .included),
+        PlanComparisonItem(id: "capturePresets", titleKey: "고급 촬영 프리셋", free: .unavailable, premium: .included),
+        PlanComparisonItem(id: "privacyExport", titleKey: "개인정보 보호 내보내기", free: .unavailable, premium: .included)
+    ]
+}
+
+enum PremiumAnalytics {
+    static func paywallViewed(entryPoint: PremiumEntryPoint) {
+        Analytics.logEvent("premium_paywall_view", parameters: ["entry_point": entryPoint.rawValue])
+    }
+
+    static func purchaseStarted(productID: String) {
+        Analytics.logEvent("premium_purchase_start", parameters: ["plan": plan(productID)])
+    }
+
+    static func purchaseSucceeded(productID: String) {
+        Analytics.logEvent("premium_purchase_success", parameters: ["plan": plan(productID)])
+    }
+
+    static func restoreSucceeded() {
+        Analytics.logEvent("premium_restore_success", parameters: nil)
+    }
+
+    static func trialUsed(_ feature: PremiumFeatureID, remaining: Int) {
+        Analytics.logEvent("premium_feature_trial_used", parameters: [
+            "feature": feature.rawValue,
+            "remaining": remaining
+        ])
+    }
+
+    static func limitReached(_ feature: PremiumFeatureID) {
+        Analytics.logEvent("premium_feature_limit_reached", parameters: ["feature": feature.rawValue])
+    }
+
+    private static func plan(_ productID: String) -> String {
+        switch productID {
+        case PurchaseManager.monthlyID: "monthly"
+        case PurchaseManager.yearlyID: "yearly"
+        case PurchaseManager.lifetimeID: "legacy_lifetime"
+        default: "unknown"
+        }
+    }
 }
 
 struct PremiumView: View {
@@ -194,6 +468,7 @@ struct PremiumView: View {
     @StateObject private var purchases = PurchaseManager.shared
     @State private var selectedID = PurchaseManager.yearlyID
     @State private var showsComparison = false
+    @State private var didLogPaywallView = false
     let entryPoint: PremiumEntryPoint
 
     init(entryPoint: PremiumEntryPoint = .general) {
@@ -245,6 +520,11 @@ struct PremiumView: View {
             await purchases.prepare()
             chooseAvailableDefault()
         }
+        .onAppear {
+            guard !didLogPaywallView else { return }
+            didLogPaywallView = true
+            PremiumAnalytics.paywallViewed(entryPoint: entryPoint)
+        }
         .onChange(of: purchases.products.map(\.id)) { _, _ in chooseAvailableDefault() }
         .alert("SubGallery Premium", isPresented: Binding(
             get: { purchases.message != nil },
@@ -280,85 +560,75 @@ struct PremiumView: View {
     private var headlineKey: String {
         switch entryPoint {
         case .receiptReport: "영수증이 지출 리포트가 됩니다."
+        case .travelMap: "여행 사진이 지도가 됩니다."
         case .documentBuilder: "사진을 하나의 문서로 만드세요."
         case .qrBuilder: "QR을 직접 만들어 보관하세요."
-        case .general: "사진은 따로. 정리는 자동으로."
+        case .albumAutomation: "앨범이 사진을 대신 관리합니다."
+        case .cleanupCenter, .iCloudSync, .capturePreset, .privacyExport, .ocrSmartActions:
+            entryPoint.featureID.map { PremiumFeatureCatalog.feature($0).titleKey } ?? "SubGallery Premium"
+        case .general: "사진은 따로. 쌓인 사진은 더 유용하게."
         }
     }
 
     private var subheadlineKey: String {
         switch entryPoint {
         case .receiptReport: "지출 흐름, 자주 결제한 곳, 큰 결제와 기간별 변화를 제한 없이 확인하세요."
+        case .travelMap: "촬영한 장소와 여행의 흐름을 지도와 타임라인으로 계속 확인하세요."
         case .documentBuilder: "여러 페이지를 정리하고 OCR이 적용된 PDF로 만들어 언제든 검색하고 공유하세요."
         case .qrBuilder: "웹사이트, Wi-Fi, 연락처, 위치 등 자주 쓰는 정보를 QR로 만들고 언제든 바로 보여주세요."
-        case .general: "자동 분류, 정리 센터, OCR 스마트 작업으로 쌓인 사진을 더 편하게 관리하세요."
+        case .albumAutomation: "완료된 사진과 오래된 사진을 자동으로 관리하고, 정리가 필요한 항목을 한눈에 확인하세요."
+        case .cleanupCenter, .iCloudSync, .capturePreset, .privacyExport, .ocrSmartActions:
+            entryPoint.featureID.map { PremiumFeatureCatalog.feature($0).detailKey } ?? ""
+        case .general: "기본 보관과 인식은 자유롭게 사용하고, 쌓인 사진에서 더 큰 결과를 만드세요."
         }
     }
 
     private var benefits: some View {
         VStack(spacing: 0) {
-            if entryPoint == .qrBuilder {
+            ForEach(Array(paywallBenefits.enumerated()), id: \.element.id) { index, benefit in
                 PremiumBenefitRow(
-                    symbol: "qrcode",
-                    title: "QR 만들기 무제한",
-                    detail: "Wi-Fi, 연락처, 링크를 QR로 만들어 보관하고 바로 보여줍니다."
+                    symbol: benefit.symbol,
+                    title: benefit.titleKey,
+                    detail: benefit.detailKey,
+                    accessCaption: benefit.accessCaption
                 )
-                Divider().padding(.leading, 52)
-            }
-            if entryPoint == .documentBuilder {
-                PremiumBenefitRow(
-                    symbol: "doc.badge.plus",
-                    title: "문서 만들기 무제한",
-                    detail: "여러 장의 문서 사진을 순서대로 정리해 검색 가능한 PDF로 만듭니다."
-                )
-                Divider().padding(.leading, 52)
-            }
-            if entryPoint == .receiptReport {
-                PremiumBenefitRow(
-                    symbol: "chart.bar.xaxis",
-                    title: "지출 리포트 무제한",
-                    detail: "영수증으로 지출 흐름과 결제 패턴을 언제든 다시 확인합니다."
-                )
-                Divider().padding(.leading, 52)
-            }
-            PremiumBenefitRow(
-                symbol: "wand.and.stars",
-                title: "자동으로 분류",
-                detail: "영수증, 문서, 임시 사진의 앨범과 보관 기간을 추천합니다."
-            )
-            Divider().padding(.leading, 52)
-            PremiumBenefitRow(
-                symbol: "tray.full.fill",
-                title: "정리할 사진만 모아서",
-                detail: "만료 예정과 완료 대기 사진을 한곳에서 빠르게 정리합니다."
-            )
-            Divider().padding(.leading, 52)
-            PremiumBenefitRow(
-                symbol: "text.viewfinder",
-                title: "사진 속 정보를 바로 사용",
-                detail: "금액, 날짜, 주소, QR 등을 인식해 바로 필요한 작업을 실행합니다."
-            )
-            Divider().padding(.leading, 52)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    supportingBenefit("icloud", "iCloud Sync")
-                    supportingBenefit("camera.filters", "Capture Preset")
-                    supportingBenefit("shield.lefthalf.filled", "개인정보 보호 내보내기")
+                if index < paywallBenefits.count - 1 {
+                    Divider().padding(.leading, 52)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
             }
         }
         .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func supportingBenefit(_ symbol: String, _ title: String) -> some View {
-        Label(L10n.text(title), systemImage: symbol)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(Color.secondary.opacity(0.1), in: Capsule())
+    private var paywallBenefits: [PremiumPaywallBenefit] {
+        var result: [PremiumPaywallBenefit] = []
+        let primaryID = entryPoint.featureID
+        if let primaryID {
+            let feature = PremiumFeatureCatalog.feature(primaryID)
+            result.append(PremiumPaywallBenefit(
+                id: feature.id.rawValue,
+                symbol: feature.symbol,
+                titleKey: feature.titleKey,
+                detailKey: feature.detailKey,
+                accessCaption: feature.accessPolicy.paywallCaption
+            ))
+        }
+
+        let groups = PremiumFeatureCatalog.generalBenefitGroups.filter { group in
+            guard let primaryID else { return true }
+            return !group.featureIDs.contains(primaryID)
+        }
+        let remainingCount = primaryID == nil ? 4 : 3
+        result.append(contentsOf: groups.prefix(remainingCount).map { group in
+            PremiumPaywallBenefit(
+                id: group.id,
+                symbol: group.symbol,
+                titleKey: group.titleKey,
+                detailKey: group.detailKey,
+                accessCaption: nil
+            )
+        })
+        return result
     }
 
     @ViewBuilder
@@ -525,6 +795,7 @@ private struct PremiumBenefitRow: View {
     let symbol: String
     let title: String
     let detail: String
+    let accessCaption: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -539,6 +810,11 @@ private struct PremiumBenefitRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if let accessCaption {
+                    Text(accessCaption)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
             }
             Spacer(minLength: 0)
         }
@@ -652,22 +928,7 @@ private struct SecondaryProductCard: View {
 }
 
 private struct PlanComparisonView: View {
-    private let rows: [(String, Bool, Bool)] = [
-        ("사진 앱과 별도 보관", true, true),
-        ("촬영 및 가져오기", true, true),
-        ("앨범과 보관 기간", true, true),
-        ("PIN 잠금", true, true),
-        ("OCR 텍스트 검색", true, true),
-        ("일반 내보내기", true, true),
-        ("스마트 자동 분류", false, true),
-        ("앨범 자동 규칙", false, true),
-        ("정리 센터", false, true),
-        ("OCR 스마트 작업", false, true),
-        ("영수증 정보 추출", false, true),
-        ("iCloud 동기화", false, true),
-        ("촬영 프리셋 설정", false, true),
-        ("개인정보 보호 내보내기", false, true)
-    ]
+    private let rows = PremiumFeatureCatalog.comparisonItems
 
     var body: some View {
         VStack(spacing: 0) {
@@ -683,13 +944,13 @@ private struct PlanComparisonView: View {
 
                 Divider()
 
-                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                     HStack {
-                        Text(L10n.text(row.0))
+                        Text(L10n.text(row.titleKey))
                             .font(.subheadline)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        availability(row.1).frame(width: 58)
-                        availability(row.2).frame(width: 76)
+                        availability(row.free).frame(width: 58)
+                        availability(row.premium).frame(width: 76)
                     }
                     .padding(.horizontal, 14)
                     .frame(minHeight: 44)
@@ -700,9 +961,22 @@ private struct PlanComparisonView: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.secondary.opacity(0.2)))
     }
 
-    private func availability(_ available: Bool) -> some View {
-        Image(systemName: available ? "checkmark.circle.fill" : "minus")
-            .foregroundStyle(available ? Color.accentColor : Color.secondary.opacity(0.55))
-            .accessibilityLabel(L10n.text(available ? "포함" : "포함되지 않음"))
+    @ViewBuilder
+    private func availability(_ availability: FeatureAvailability) -> some View {
+        switch availability {
+        case .included:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(Color.accentColor)
+                .accessibilityLabel(L10n.text("포함"))
+        case .unavailable:
+            Text(availability.title).foregroundStyle(.secondary)
+        case .trial, .basic, .unlimited, .advanced:
+            Text(availability.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(availability == .unlimited || availability == .advanced
+                    ? Color.accentColor : Color.primary)
+                .multilineTextAlignment(.center)
+                .minimumScaleFactor(0.7)
+        }
     }
 }

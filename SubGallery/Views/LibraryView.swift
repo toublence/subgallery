@@ -327,6 +327,9 @@ struct LibraryView: View {
         .sheet(isPresented: $showsPremium) {
             PremiumView().presentationDetents([.large])
         }
+        .onChange(of: purchases.isPremium) { _, isPremium in
+            if isPremium, showsPremium { showsPremium = false }
+        }
         .sheet(item: $coverAlbum) { album in
             AlbumCoverPickerView(album: album, items: media.filter { $0.albumID == album.id && $0.deletedAt == nil })
                 .presentationDetents([.large])
@@ -892,7 +895,10 @@ struct CleanupCenterView: View {
                 .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showsPremium) {
-            PremiumView().presentationDetents([.large])
+            PremiumView(entryPoint: .cleanupCenter).presentationDetents([.large])
+        }
+        .onChange(of: purchases.isPremium) { _, isPremium in
+            if isPremium, showsPremium { showsPremium = false }
         }
         .confirmationDialog(L10n.text("선택한 사진을 완료 처리할까요?"), isPresented: Binding(
             get: { !pendingComplete.isEmpty },

@@ -65,7 +65,7 @@ final class Document {
 /// The free-document rule as a value, mirroring `TravelMapTrialPolicy`, so the
 /// counting can be tested without touching the keychain.
 struct DocumentTrialPolicy: Equatable {
-    static let freeUseLimit = 3
+    static let freeUseLimit = PremiumFeatureCatalog.trialLimit(for: .documentBuilder)
     private(set) var used: Int
 
     init(used: Int) {

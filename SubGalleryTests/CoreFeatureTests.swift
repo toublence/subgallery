@@ -302,6 +302,32 @@ final class CoreFeatureTests: XCTestCase {
         XCTAssertFalse(CapturePresetService.canUse(preset))
     }
 
+    func testBuiltInTemplateCaptureIsFreeButCustomPresetRequiresPremium() {
+        let builtIn = CapturePreset(name: "Receipt")
+        builtIn.purpose = .receipt
+        builtIn.isBuiltIn = true
+        let custom = CapturePreset(name: "Work")
+        custom.purpose = .custom
+
+        XCTAssertTrue(CapturePresetService.canUse(builtIn, hasPremium: false))
+        XCTAssertFalse(CapturePresetService.canUse(custom, hasPremium: false))
+        XCTAssertTrue(CapturePresetService.canUse(custom, hasPremium: true))
+    }
+
+    func testPremiumFeatureCatalogMatchesPublishedAccessPolicy() {
+        XCTAssertEqual(PremiumFeatureCatalog.trialLimit(for: .receiptReport), 3)
+        XCTAssertEqual(PremiumFeatureCatalog.trialLimit(for: .travelMap), 5)
+        XCTAssertEqual(PremiumFeatureCatalog.trialLimit(for: .documentBuilder), 3)
+        XCTAssertEqual(PremiumFeatureCatalog.trialLimit(for: .qrBuilder), 5)
+        XCTAssertEqual(
+            PremiumFeatureCatalog.feature(.advancedAlbumAutomation).accessPolicy,
+            .freeBasicPremiumAdvanced
+        )
+        XCTAssertEqual(PremiumFeatureCatalog.feature(.cleanupCenter).accessPolicy, .premium)
+        XCTAssertFalse(PurchaseManager.productIDs.contains(PurchaseManager.lifetimeID))
+        XCTAssertTrue(PurchaseManager.entitlementProductIDs.contains(PurchaseManager.lifetimeID))
+    }
+
     func testPremiumBackfillUsesCompletedOCRForClassificationAndReceiptExtraction() async throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -824,10 +850,19 @@ final class CoreFeatureTests: XCTestCase {
         autoItem.albumID = automatic.id
         let looseItem = newItem(context)
 
-        XCTAssertFalse(AlbumAutomationService.allowsAutomaticCleanup(manualItem, albums: albums))
-        XCTAssertTrue(AlbumAutomationService.allowsAutomaticCleanup(autoItem, albums: albums))
+        XCTAssertFalse(AlbumAutomationService.allowsAutomaticCleanup(
+            manualItem, albums: albums, isPremium: true
+        ))
+        XCTAssertTrue(AlbumAutomationService.allowsAutomaticCleanup(
+            autoItem, albums: albums, isPremium: true
+        ))
+        XCTAssertFalse(AlbumAutomationService.allowsAutomaticCleanup(
+            autoItem, albums: albums, isPremium: false
+        ))
         XCTAssertTrue(
-            AlbumAutomationService.allowsAutomaticCleanup(looseItem, albums: albums),
+            AlbumAutomationService.allowsAutomaticCleanup(
+                looseItem, albums: albums, isPremium: false
+            ),
             "photos outside a user album keep the existing behaviour"
         )
     }
@@ -875,7 +910,12 @@ final class CoreFeatureTests: XCTestCase {
         pinnedOld.isPinned = true
 
         let media = [old, waiting, soon, pinnedOld]
-        let suggestions = AlbumAutomationService.cleanupSuggestions(for: album, media: media, now: now)
+        let suggestions = AlbumAutomationService.cleanupSuggestions(
+            for: album,
+            media: media,
+            now: now,
+            isPremium: true
+        )
 
         XCTAssertEqual(suggestions.agedOut.map(\.id), [old.id])
         XCTAssertEqual(suggestions.waitingForCompletion.map(\.id), [waiting.id])
@@ -1682,12 +1722,23 @@ final class CoreFeatureTests: XCTestCase {
         var policy = TravelMapTrialPolicy(used: 0)
         for expectedRemaining in stride(from: 4, through: 0, by: -1) {
             XCTAssertTrue(policy.canOpen(isPremium: false))
-            policy = policy.consumingIfEligible(isPremium: false)
+            policy = policy.consumingIfEligible(isPremium: false, didRenderMap: true)
             XCTAssertEqual(policy.remaining, expectedRemaining)
         }
         XCTAssertFalse(policy.canOpen(isPremium: false))
         XCTAssertTrue(policy.canOpen(isPremium: true))
-        XCTAssertEqual(policy.consumingIfEligible(isPremium: true), policy)
+        XCTAssertEqual(policy.consumingIfEligible(isPremium: true, didRenderMap: true), policy)
+    }
+
+    func testTravelMapTrialDoesNotConsumeWithoutLocationDataOrSuccessfulRender() {
+        let exhausted = TravelMapTrialPolicy(used: TravelMapTrialPolicy.freeUseLimit)
+        XCTAssertTrue(exhausted.canOpen(isPremium: false, hasMapData: false))
+
+        let fresh = TravelMapTrialPolicy(used: 0)
+        XCTAssertEqual(
+            fresh.consumingIfEligible(isPremium: false, didRenderMap: false),
+            fresh
+        )
     }
 
     func testReceiptReportUsesApprovalAmountAndExcludesIdentifierFromTotal() throws {

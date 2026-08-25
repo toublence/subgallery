@@ -5,7 +5,7 @@ import SwiftData
 import SwiftUI
 
 struct TravelMapTrialPolicy: Equatable {
-    static let freeUseLimit = 5
+    static let freeUseLimit = PremiumFeatureCatalog.trialLimit(for: .travelMap)
     private(set) var used: Int
 
     init(used: Int) {
@@ -13,9 +13,11 @@ struct TravelMapTrialPolicy: Equatable {
     }
 
     var remaining: Int { max(0, Self.freeUseLimit - used) }
-    func canOpen(isPremium: Bool) -> Bool { isPremium || remaining > 0 }
-    func consumingIfEligible(isPremium: Bool) -> Self {
-        guard !isPremium, remaining > 0 else { return self }
+    func canOpen(isPremium: Bool, hasMapData: Bool = true) -> Bool {
+        !hasMapData || isPremium || remaining > 0
+    }
+    func consumingIfEligible(isPremium: Bool, didRenderMap: Bool) -> Self {
+        guard !isPremium, didRenderMap, remaining > 0 else { return self }
         return Self(used: used + 1)
     }
 }
@@ -33,14 +35,24 @@ enum TravelMapUsageStore {
 
     static var remaining: Int { TravelMapTrialPolicy(used: used).remaining }
 
-    static func canOpen(isPremium: Bool) -> Bool {
-        TravelMapTrialPolicy(used: used).canOpen(isPremium: isPremium)
+    static func canOpen(isPremium: Bool, hasMapData: Bool = true) -> Bool {
+        TravelMapTrialPolicy(used: used).canOpen(
+            isPremium: isPremium,
+            hasMapData: hasMapData
+        )
+    }
+
+    static func isLastFreeUse(isPremium: Bool) -> Bool {
+        !isPremium && remaining == 1
     }
 
     @discardableResult
-    static func consumeIfEligible(isPremium: Bool) -> Int {
+    static func consumeIfEligible(isPremium: Bool, didRenderMap: Bool) -> Int {
         let current = TravelMapTrialPolicy(used: used)
-        let next = current.consumingIfEligible(isPremium: isPremium)
+        let next = current.consumingIfEligible(
+            isPremium: isPremium,
+            didRenderMap: didRenderMap
+        )
         guard next != current else { return current.remaining }
         set(next.used)
         return next.remaining
@@ -81,6 +93,7 @@ struct MediaMapView: View {
     @Query(sort: \MediaItem.createdAt, order: .reverse) private var media: [MediaItem]
     let templatePurpose: CapturePurpose
     let title: String
+    @StateObject private var purchases = PurchaseManager.shared
     @StateObject private var placeNames = MapPlaceNameStore()
     @State private var section: MapSection = .map
     @State private var position: MapCameraPosition = .automatic
@@ -88,6 +101,8 @@ struct MediaMapView: View {
     @State private var viewerItem: MediaItem?
     @State private var selectedYear: Int?
     @State private var mapPresentation: MapPresentation = .regions
+    @State private var consumedTrialThisSession = false
+    @State private var showsFreeLimitNotice = false
     @AppStorage("camera.saveLocation") private var savesLocation = false
 
     private var allLocatedItems: [MediaItem] {
@@ -146,6 +161,12 @@ struct MediaMapView: View {
         }
         .task {
             await backfillStoredMetadata()
+            consumeTrialAfterMapIsReady()
+        }
+        .alert(L10n.text("무료 여행 지도를 모두 사용했습니다."), isPresented: $showsFreeLimitNotice) {
+            Button(L10n.text("확인"), role: .cancel) { }
+        } message: {
+            Text(L10n.text("다음 여행 지도부터 Premium이 필요합니다."))
         }
         .onChange(of: selectedYear) { _, _ in
             selectedClusterID = nil
@@ -596,6 +617,18 @@ struct MediaMapView: View {
             changed = true
         }
         if changed { try? modelContext.save() }
+    }
+
+    private func consumeTrialAfterMapIsReady() {
+        guard !consumedTrialThisSession, !purchases.isPremium, !allLocatedItems.isEmpty else { return }
+        let wasLastFreeUse = TravelMapUsageStore.isLastFreeUse(isPremium: false)
+        let remaining = TravelMapUsageStore.consumeIfEligible(
+            isPremium: false,
+            didRenderMap: true
+        )
+        consumedTrialThisSession = true
+        PremiumAnalytics.trialUsed(.travelMap, remaining: remaining)
+        if wasLastFreeUse { showsFreeLimitNotice = true }
     }
 }
 

@@ -326,7 +326,12 @@ struct DocumentBuilderView: View {
                     let wasLastFreeUse = DocumentBuilderUsageStore.isLastFreeUse(
                         isPremium: purchases.isPremium
                     )
-                    DocumentBuilderUsageStore.recordSuccessfulBuild(isPremium: purchases.isPremium)
+                    let remaining = DocumentBuilderUsageStore.recordSuccessfulBuild(
+                        isPremium: purchases.isPremium
+                    )
+                    if !purchases.isPremium {
+                        PremiumAnalytics.trialUsed(.documentBuilder, remaining: remaining)
+                    }
                     isBuilding = false
                     builtDocument = document
                     if wasLastFreeUse { showsFreeLimitNotice = true }

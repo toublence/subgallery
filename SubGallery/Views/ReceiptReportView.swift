@@ -936,6 +936,7 @@ struct ReceiptReportView: View {
             didRenderReport: true
         )
         consumedThisSession = true
+        PremiumAnalytics.trialUsed(.receiptReport, remaining: remainingFreeUses)
     }
 }
 

@@ -285,7 +285,12 @@ struct QRCodeBuilderView: View {
                         isPremium: purchases.isPremium
                     )
                     if !didConsumeFreeUse {
-                        QRBuilderUsageStore.recordSuccessfulSave(isPremium: purchases.isPremium)
+                        let remaining = QRBuilderUsageStore.recordSuccessfulSave(
+                            isPremium: purchases.isPremium
+                        )
+                        if !purchases.isPremium {
+                            PremiumAnalytics.trialUsed(.qrBuilder, remaining: remaining)
+                        }
                         didConsumeFreeUse = true
                     }
                     savedItemID = item.id

@@ -124,7 +124,7 @@ struct AlbumView: View {
     @State private var documentToOpen: Document?
     @State private var documentPendingDeletion: Document?
     @State private var showsTravelMap = false
-    @State private var showsPremium = false
+    @State private var showsTravelPaywall = false
     @State private var bulkMessage: String?
     @State private var gridMode: AlbumGridMode
     @State private var sortMode: AlbumSortMode
@@ -452,8 +452,21 @@ struct AlbumView: View {
         .navigationDestination(isPresented: $showsTravelMap) {
             MediaMapView(templatePurpose: .travel, title: CapturePurpose.travel.title)
         }
-        .sheet(isPresented: $showsPremium) {
-            PremiumView().presentationDetents([.large])
+        .sheet(isPresented: $showsTravelPaywall) {
+            PremiumView(entryPoint: .travelMap).presentationDetents([.large])
+        }
+        .onChange(of: purchases.isPremium) { _, isPremium in
+            guard isPremium else { return }
+            if showsDocumentPaywall {
+                showsDocumentPaywall = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { showsDocumentBuilder = true }
+            } else if showsQRPaywall {
+                showsQRPaywall = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { showsQRBuilder = true }
+            } else if showsTravelPaywall {
+                showsTravelPaywall = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { showsTravelMap = true }
+            }
         }
         .alert(L10n.text("가져올 수 없음"), isPresented: Binding(
             get: { importError != nil },
@@ -528,6 +541,7 @@ struct AlbumView: View {
         if DocumentBuilderUsageStore.hasFreeUseAvailable(isPremium: purchases.isPremium) {
             showsDocumentBuilder = true
         } else {
+            PremiumAnalytics.limitReached(.documentBuilder)
             showsDocumentPaywall = true
         }
     }
@@ -538,6 +552,7 @@ struct AlbumView: View {
         if QRBuilderUsageStore.hasFreeUseAvailable(isPremium: purchases.isPremium) {
             showsQRBuilder = true
         } else {
+            PremiumAnalytics.limitReached(.qrBuilder)
             showsQRPaywall = true
         }
     }
@@ -927,12 +942,39 @@ struct AlbumView: View {
     }
 
     private func openTravelMap() {
-        guard TravelMapUsageStore.canOpen(isPremium: purchases.isPremium) else {
-            showsPremium = true
-            return
+        Task { @MainActor in
+            let travelItems = allMedia.filter {
+                $0.deletedAt == nil && $0.templatePurpose == .travel
+            }
+            var hasLocationData = travelItems.contains { item in
+                item.latitude.map { (-90...90).contains($0) } == true
+                    && item.longitude.map { (-180...180).contains($0) } == true
+            }
+            var changed = false
+            if !hasLocationData {
+                for item in travelItems where item.kind == .photo
+                    && (item.latitude == nil || item.longitude == nil) {
+                    let metadata = await MediaStorage.shared.metadata(for: item.localPath)
+                    guard let latitude = metadata.latitude, let longitude = metadata.longitude else { continue }
+                    item.latitude = latitude
+                    item.longitude = longitude
+                    if let capturedAt = metadata.capturedAt { item.createdAt = capturedAt }
+                    hasLocationData = true
+                    changed = true
+                }
+            }
+            if changed { try? modelContext.save() }
+
+            guard TravelMapUsageStore.canOpen(
+                isPremium: purchases.isPremium,
+                hasMapData: hasLocationData
+            ) else {
+                PremiumAnalytics.limitReached(.travelMap)
+                showsTravelPaywall = true
+                return
+            }
+            showsTravelMap = true
         }
-        TravelMapUsageStore.consumeIfEligible(isPremium: purchases.isPremium)
-        showsTravelMap = true
     }
 
     @MainActor

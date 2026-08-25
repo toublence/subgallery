@@ -59,7 +59,9 @@ enum CapturePresetService {
     }
 
     static func canUse(_ preset: CapturePreset, hasPremium: Bool = PremiumAccess.isActive) -> Bool {
-        preset.purpose == .general || hasPremium
+        // Built-in Template capture is a core feature. Premium applies only to
+        // user-created/customized capture presets.
+        preset.isBuiltIn || preset.purpose == .general || hasPremium
     }
 
     /// Parking was a built-in template in older releases. Remove only the

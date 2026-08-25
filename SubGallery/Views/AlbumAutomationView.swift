@@ -1,16 +1,19 @@
 import SwiftData
 import SwiftUI
 
-/// A user album and its automation are core SubGallery features.
+/// Basic album management is free; automatic cleanup and suggestions are the
+/// advanced automation layer sold by Premium.
 struct AlbumAutomationView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query private var media: [MediaItem]
+    @StateObject private var purchases = PurchaseManager.shared
     let album: Album
 
     @State private var customDate: Date
     @State private var showsRetroactiveConfirmation = false
     @State private var showsSuggestions = false
+    @State private var showsPremium = false
     @State private var message: String?
 
     init(album: Album) {
@@ -52,6 +55,12 @@ struct AlbumAutomationView: View {
         }
         .sheet(isPresented: $showsSuggestions) {
             AlbumCleanupSuggestionsView(album: album)
+        }
+        .sheet(isPresented: $showsPremium) {
+            PremiumView(entryPoint: .albumAutomation).presentationDetents([.large])
+        }
+        .onChange(of: purchases.isPremium) { _, isPremium in
+            if isPremium, showsPremium { showsPremium = false }
         }
         .confirmationDialog(
             L10n.format(
@@ -125,6 +134,11 @@ struct AlbumAutomationView: View {
             Picker(L10n.text("완료 방식"), selection: Binding(
                 get: { album.autoCleanupEnabled },
                 set: { enabled in
+                    guard !enabled || purchases.isPremium else {
+                        PremiumAnalytics.limitReached(.advancedAlbumAutomation)
+                        showsPremium = true
+                        return
+                    }
                     update { album.autoCleanupEnabled = enabled }
                 }
             )) {
@@ -134,7 +148,10 @@ struct AlbumAutomationView: View {
         } header: {
             Text(L10n.text("완료와 정리"))
         } footer: {
-            Text(L10n.text("자동 정리된 사진은 최근 삭제로 이동하며 7일 동안 복구할 수 있습니다. 고정한 사진은 정리되지 않습니다."))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L10n.text("자동 정리된 사진은 최근 삭제로 이동하며 7일 동안 복구할 수 있습니다. 고정한 사진은 정리되지 않습니다."))
+                if !purchases.isPremium { Text(L10n.text("자동 정리는 Premium 고급 자동화입니다.")) }
+            }
         }
     }
 
@@ -143,13 +160,22 @@ struct AlbumAutomationView: View {
     private var advancedSection: some View {
         Section {
             Button {
+                guard purchases.isPremium else {
+                    PremiumAnalytics.limitReached(.advancedAlbumAutomation)
+                    showsPremium = true
+                    return
+                }
                 showsSuggestions = true
             } label: {
                 LabeledContent(L10n.text("정리 제안")) {
-                    Text(L10n.format("%d장", suggestionCount))
+                    if purchases.isPremium {
+                        Text(L10n.format("%d장", suggestionCount))
+                    } else {
+                        Image(systemName: "lock.fill").foregroundStyle(.secondary)
+                    }
                 }
             }
-            .disabled(suggestionCount == 0)
+            .disabled(purchases.isPremium && suggestionCount == 0)
         } header: {
             Text(L10n.text("고급 자동화"))
         }

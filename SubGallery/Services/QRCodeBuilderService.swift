@@ -85,7 +85,7 @@ enum QRBuilderInput: Equatable {
 
 /// QR authoring is lighter than document building, so it gets a longer free run.
 struct QRBuilderTrialPolicy: Equatable {
-    static let freeUseLimit = 5
+    static let freeUseLimit = PremiumFeatureCatalog.trialLimit(for: .qrBuilder)
     private(set) var used: Int
 
     init(used: Int) {

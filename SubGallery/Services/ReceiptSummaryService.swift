@@ -157,7 +157,7 @@ enum ReceiptSummaryService {
 // MARK: - Free report access
 
 struct ReceiptReportTrialPolicy: Equatable {
-    static let freeUseLimit = 3
+    static let freeUseLimit = PremiumFeatureCatalog.trialLimit(for: .receiptReport)
 
     private(set) var used: Int
 

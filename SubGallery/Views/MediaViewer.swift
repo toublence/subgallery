@@ -35,6 +35,7 @@ struct MediaViewer: View {
     @State private var actionMessage: String?
     @State private var showsCompleteConfirmation = false
     @State private var showsPremium = false
+    @State private var premiumEntryPoint = PremiumEntryPoint.general
     @State private var showsReceiptEditor = false
 
     init(items: [MediaItem], initialID: UUID, isRecentlyDeleted: Bool) {
@@ -102,7 +103,10 @@ struct MediaViewer: View {
         .sheet(isPresented: $showsRetention) { if let current { RetentionPickerView(item: current) } }
         .sheet(isPresented: $showsReminder) { if let current { ReminderPickerView(item: current) } }
         .sheet(isPresented: $showsAlbumMove) { albumMovePicker }
-        .sheet(isPresented: $showsPremium) { PremiumView() }
+        .sheet(isPresented: $showsPremium) { PremiumView(entryPoint: premiumEntryPoint) }
+        .onChange(of: purchases.isPremium) { _, isPremium in
+            if isPremium, showsPremium { showsPremium = false }
+        }
         .sheet(isPresented: $showsReceiptEditor) {
             if let current { ReceiptDetailsEditorView(item: current) }
         }
@@ -203,7 +207,10 @@ struct MediaViewer: View {
         }
         qrContentActions(for: item)
         if hasPremiumSmartContent(item), !purchases.isPremium {
-            Button { showsPremium = true } label: {
+            Button {
+                premiumEntryPoint = .ocrSmartActions
+                showsPremium = true
+            } label: {
                 Label(L10n.text("사진 속 정보 사용"), systemImage: "lock.fill")
             }
         }
@@ -699,7 +706,10 @@ struct MediaInfoView: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L10n.text("완료")) { dismiss() } } }
         }
         .presentationDetents([.large])
-        .sheet(isPresented: $showsPremium) { PremiumView() }
+        .sheet(isPresented: $showsPremium) { PremiumView(entryPoint: .privacyExport) }
+        .onChange(of: purchases.isPremium) { _, isPremium in
+            if isPremium, showsPremium { showsPremium = false }
+        }
         .task {
             guard item.kind == .photo else { return }
             metadataEntries = await MediaStorage.shared.detailedMetadata(for: item.localPath)
