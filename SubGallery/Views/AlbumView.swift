@@ -66,6 +66,8 @@ struct AlbumView: View {
     @State private var selection = Set<UUID>()
     @State private var isSelecting = false
     @State private var viewerItem: MediaItem?
+    @State private var qrDetailItem: MediaItem?
+    @State private var qrActionMessage: String?
     @State private var showsMoveSheet = false
     @State private var showsRetentionSheet = false
     @State private var showsShareSheet = false
@@ -161,6 +163,13 @@ struct AlbumView: View {
             if case .template(.receipt) = destination {
                 LazyVStack(spacing: 10) {
                     ForEach(items) { item in receiptRow(item) }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 20)
+            } else if case .template(.qr) = destination {
+                LazyVStack(spacing: 10) {
+                    ForEach(items) { item in qrRow(item) }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
@@ -272,6 +281,17 @@ struct AlbumView: View {
                 }
             }
         }
+        .sheet(item: $qrDetailItem) { item in
+            QRDetailView(item: item) { viewerItem = item }
+        }
+        .alert(L10n.text("사진 작업"), isPresented: Binding(
+            get: { qrActionMessage != nil },
+            set: { if !$0 { qrActionMessage = nil } }
+        )) {
+            Button(L10n.text("확인"), role: .cancel) { }
+        } message: {
+            Text(qrActionMessage ?? "")
+        }
         .fullScreenCover(item: $viewerItem) { item in
             MediaViewer(items: items, initialID: item.id, isRecentlyDeleted: isRecentlyDeleted)
         }
@@ -326,6 +346,26 @@ struct AlbumView: View {
             .contentShape(Rectangle())
             .contextMenu { contextMenu(for: item) }
             .accessibilityAddTraits(selection.contains(item.id) ? .isSelected : [])
+    }
+
+    private func qrRow(_ item: MediaItem) -> some View {
+        QRInfoRow(
+            item: item,
+            isSelecting: isSelecting,
+            isSelected: selection.contains(item.id),
+            open: {
+                // A QR is opened for its information, so the detail screen comes
+                // first; the photo itself stays one tap further in.
+                if isSelecting { toggle(item.id) } else { qrDetailItem = item }
+            },
+            runAction: { info in
+                if let error = QRActionRunner.perform(info, for: item, in: modelContext) {
+                    qrActionMessage = error
+                }
+            }
+        )
+        .contextMenu { contextMenu(for: item) }
+        .accessibilityAddTraits(selection.contains(item.id) ? .isSelected : [])
     }
 
     private func receiptRow(_ item: MediaItem) -> some View {

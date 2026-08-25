@@ -606,6 +606,174 @@ final class CoreFeatureTests: XCTestCase {
         XCTAssertEqual(OCRService.qrPayload(symbology: .qr, payload: " hello "), "hello")
     }
 
+    // MARK: - QR workflow
+
+    func testQRWorkflowCase1URLShowsDomainAndOpens() {
+        let info = QRContentService.parse("https://www.example.com/path?a=1")
+        XCTAssertEqual(info.type, .url)
+        XCTAssertEqual(info.title, "example.com")
+        XCTAssertEqual(info.primaryAction, .open)
+        XCTAssertEqual(info.actionValue, "https://www.example.com/path?a=1")
+    }
+
+    func testQRWorkflowCase2LotteryURLIsPlainURLWithoutHardcoding() {
+        let info = QRContentService.parse("https://m.dhlottery.co.kr/qr.do?method=winQr&v=1234")
+        XCTAssertEqual(info.type, .url)
+        // Domain only — no brand lookup table.
+        XCTAssertEqual(info.title, "m.dhlottery.co.kr")
+        XCTAssertEqual(info.primaryAction, .open)
+    }
+
+    func testQRWorkflowCase3PlainTextCopies() {
+        let info = QRContentService.parse("주문번호 A-1029 확인 바랍니다")
+        XCTAssertEqual(info.type, .text)
+        XCTAssertEqual(info.primaryAction, .copy)
+        XCTAssertEqual(info.actionValue, "주문번호 A-1029 확인 바랍니다")
+    }
+
+    func testQRWorkflowCase4PhoneNumberCalls() {
+        for payload in ["tel:+82-10-1234-5678", "010-1234-5678"] {
+            let info = QRContentService.parse(payload)
+            XCTAssertEqual(info.type, .phone, payload)
+            XCTAssertEqual(info.primaryAction, .call, payload)
+        }
+        // An order number must not become a call button.
+        XCTAssertEqual(QRContentService.parse("A-1029").type, .text)
+    }
+
+    func testQRWorkflowCase5WiFiHidesPasswordFromListButKeepsItCopyable() {
+        let info = QRContentService.parse(#"WIFI:T:WPA;S:Namslab_5G;P:secret\;pass;H:false;;"#)
+        XCTAssertEqual(info.type, .wifi)
+        XCTAssertEqual(info.subtitle, "Namslab_5G · WPA")
+        XCTAssertFalse(info.subtitle.contains("secret"), "password must never reach a list row")
+
+        let password = info.fields.first { $0.isSensitive }
+        XCTAssertEqual(password?.value, "secret;pass", "escaped semicolon should survive parsing")
+        XCTAssertEqual(info.fields.first { $0.label == "SSID" }?.value, "Namslab_5G")
+    }
+
+    func testQRWorkflowCase6MultiplePayloadsAreAllPreserved() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let item = MediaItem(kind: .photo, source: .camera, localPath: "Media/multi-qr.jpg")
+        item.detectedQRCodes = [
+            "https://example.com",
+            "WIFI:T:WPA;S:Guest;P:pw;;",
+            "tel:01012345678"
+        ]
+        context.insert(item)
+
+        let contents = item.qrContents
+        XCTAssertEqual(contents.count, 3)
+        XCTAssertEqual(contents.map(\.type), [.url, .wifi, .phone])
+        XCTAssertEqual(item.primaryQRContent?.type, .url)
+    }
+
+    func testQRWorkflowCase7CompletionMovesToRecentlyDeletedAndRestores() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let item = MediaItem(kind: .photo, source: .camera, localPath: "Media/qr-done.jpg")
+        item.detectedQRCodes = ["https://example.com"]
+        item.templatePurpose = .qr
+        RetentionService.apply(.sevenDays, to: item)
+        context.insert(item)
+
+        await MediaLifecycleService.complete(item)
+        XCTAssertNotNil(item.deletedAt)
+        XCTAssertNotNil(item.completedAt)
+
+        MediaLifecycleService.restore(item)
+        XCTAssertNil(item.deletedAt)
+        XCTAssertEqual(item.templatePurpose, .qr)
+    }
+
+    func testQRParserCoversRemainingTypes() {
+        XCTAssertEqual(QRContentService.parse("mailto:a@b.com?subject=Hi").type, .email)
+        XCTAssertEqual(QRContentService.parse("a@b.com").type, .email)
+        XCTAssertEqual(QRContentService.parse("SMSTO:01012345678:안녕").type, .sms)
+
+        let geo = QRContentService.parse("geo:37.5665,126.9780")
+        XCTAssertEqual(geo.type, .location)
+        XCTAssertEqual(geo.primaryAction, .map)
+        XCTAssertEqual(geo.coordinate, QRCoordinate(latitude: 37.5665, longitude: 126.9780))
+
+        let vcard = QRContentService.parse(
+            "BEGIN:VCARD\nVERSION:3.0\nFN:홍길동\nORG:남슬랩;\nTEL;TYPE=CELL:010-1111-2222\nEMAIL:hong@example.com\nEND:VCARD"
+        )
+        XCTAssertEqual(vcard.type, .contact)
+        XCTAssertEqual(vcard.title, "홍길동")
+        XCTAssertEqual(vcard.primaryAction, .call)
+        XCTAssertEqual(vcard.fields.first { $0.label == L10n.text("회사") }?.value, "남슬랩")
+
+        // A scheme we do not handle stays unknown rather than pretending to be text.
+        XCTAssertEqual(QRContentService.parse("bitcoin:1A2b3C4d").type, .unknown)
+    }
+
+    func testQRSearchTermsIncludeParsedValues() {
+        let terms = QRContentService.searchTerms(for: [
+            "https://www.dhlottery.co.kr/x",
+            "WIFI:T:WPA;S:Namslab_5G;P:secret;;"
+        ])
+        XCTAssertTrue(terms.contains("dhlottery.co.kr"))
+        XCTAssertTrue(terms.contains("Namslab_5G"))
+        XCTAssertFalse(terms.contains("secret"), "sensitive values must stay out of the search index")
+    }
+
+    func testQRUsageStateStartsUnopenedAndIsRecordedByAnAction() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let item = MediaItem(kind: .photo, source: .camera, localPath: "Media/qr-open.jpg")
+        item.detectedQRCodes = ["https://example.com"]
+        context.insert(item)
+
+        XCTAssertFalse(item.isQRUsed)
+        XCTAssertNil(item.qrOpenedAt)
+
+        QRActionRunner.markUsed(item, in: context)
+        let firstOpen = try XCTUnwrap(item.qrOpenedAt)
+        XCTAssertTrue(item.isQRUsed)
+
+        // A second action must not overwrite when it was first dealt with.
+        QRActionRunner.markUsed(item, in: context)
+        XCTAssertEqual(item.qrOpenedAt, firstOpen)
+
+        QRActionRunner.clearUsed(item, in: context)
+        XCTAssertFalse(item.isQRUsed)
+    }
+
+    func testDatesFollowTheSelectedAppLanguageNotTheSystemLocale() {
+        let date = Date(timeIntervalSince1970: 1_787_000_000)
+        let defaults = UserDefaults.standard
+        let original = defaults.string(forKey: "app.language")
+        defer { defaults.set(original, forKey: "app.language") }
+
+        defaults.set("en", forKey: "app.language")
+        let english = L10n.date(date, dateStyle: .long)
+        defaults.set("ko", forKey: "app.language")
+        let korean = L10n.date(date, dateStyle: .long)
+
+        XCTAssertNotEqual(english, korean)
+        XCTAssertFalse(english.contains("년"), "English must not fall back to Korean formatting")
+        XCTAssertTrue(korean.contains("년"))
+    }
+
+    func testEveryLocaleTranslatesTheQRUsageStrings() throws {
+        for locale in ["en", "ko", "ja", "zh-Hans", "zh-Hant", "de", "fr", "es", "ar"] {
+            let path = try XCTUnwrap(
+                Bundle.main.path(forResource: locale, ofType: "lproj"),
+                locale
+            )
+            let bundle = try XCTUnwrap(Bundle(path: path), locale)
+            for key in ["확인함", "미확인", "확인함으로 표시", "미확인으로 표시", "링크", "비밀번호"] {
+                let value = bundle.localizedString(forKey: key, value: nil, table: nil)
+                XCTAssertFalse(value.isEmpty, "\(locale) / \(key)")
+                if locale != "ko" {
+                    XCTAssertNotEqual(value, key, "\(locale) is missing a translation for \(key)")
+                }
+            }
+        }
+    }
+
     func testTemplateClassificationCase2LeavesOrdinaryPhotoUnclassified() throws {
         let container = try makeContainer()
         let context = container.mainContext

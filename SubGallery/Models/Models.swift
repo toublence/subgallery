@@ -210,6 +210,9 @@ final class MediaItem {
     var suggestedAlbumID: UUID?
     var suggestedRetentionRaw: String?
     var premiumAnalysisVersion: Int = 0
+    /// When the user actually acted on this item's QR. `nil` means unopened.
+    /// A date rather than a flag so the detail screen can say when it happened.
+    var qrOpenedAt: Date?
 
     init(
         id: UUID = UUID(), kind: MediaKind, source: MediaSource,
@@ -285,6 +288,7 @@ final class MediaItem {
         set { purpose = newValue ?? .general }
     }
     var isUnclassified: Bool { albumID == nil && templatePurpose == nil }
+    var isQRUsed: Bool { qrOpenedAt != nil }
     var primaryAction: PrimaryMediaAction {
         get { PrimaryMediaAction(rawValue: primaryActionRaw) ?? .automatic }
         set { primaryActionRaw = newValue.rawValue }
@@ -322,10 +326,15 @@ final class MediaItem {
         set { detectedQRCodesJSON = Self.encode(newValue) }
     }
     var analysisSearchText: String {
-        ([recognizedText, receiptMerchant, receiptAmount]
-            + detectedURLs + detectedPhoneNumbers + detectedAddresses + detectedQRCodes)
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
+        // Parsed QR terms — domain, SSID, contact name — are included so a QR is
+        // findable by what it means, not only by its raw payload.
+        var terms: [String] = [recognizedText, receiptMerchant, receiptAmount]
+        terms += detectedURLs
+        terms += detectedPhoneNumbers
+        terms += detectedAddresses
+        terms += detectedQRCodes
+        terms += QRContentService.searchTerms(for: detectedQRCodes)
+        return terms.filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
     private static func encode<T: Encodable>(_ value: T) -> String {

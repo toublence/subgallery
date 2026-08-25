@@ -66,6 +66,24 @@ enum L10n {
         String(format: text(key), locale: AppLanguage.selected.locale, arguments: arguments)
     }
 
+    /// `Date.formatted` follows the system locale, which is not the same thing as
+    /// the language the user picked in Settings. Every user-facing date goes
+    /// through here so it matches the rest of the interface.
+    static func date(
+        _ date: Date,
+        dateStyle: Date.FormatStyle.DateStyle = .abbreviated,
+        timeStyle: Date.FormatStyle.TimeStyle = .shortened
+    ) -> String {
+        date.formatted(
+            Date.FormatStyle(date: dateStyle, time: timeStyle)
+                .locale(AppLanguage.selected.locale)
+        )
+    }
+
+    static func monthDay(_ date: Date) -> String {
+        date.formatted(.dateTime.month().day().locale(AppLanguage.selected.locale))
+    }
+
     private static func localizedBundle(for identifier: String) -> Bundle? {
         guard let path = Bundle.main.path(forResource: identifier, ofType: "lproj") else { return nil }
         return Bundle(path: path)

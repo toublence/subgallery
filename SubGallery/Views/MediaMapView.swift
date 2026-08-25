@@ -334,7 +334,7 @@ struct MediaMapView: View {
                 clusterMetric(value: "\(cluster.items.count)", title: "사진", symbol: "photo")
                 clusterMetric(value: "\(dayCount)", title: "방문 일수", symbol: "calendar")
                 clusterMetric(
-                    value: latestDate.formatted(.dateTime.month().day()),
+                    value: L10n.monthDay(latestDate),
                     title: "최근 방문",
                     symbol: "clock"
                 )
@@ -755,7 +755,7 @@ private struct TimelineStopRow: View {
                                 .background(Color.travelCoral, in: Capsule())
                             Text(placeName ?? L10n.text("장소 확인 중"))
                                 .font(.title2.bold())
-                            Text(stop.date.formatted(date: .long, time: .shortened))
+                            Text(L10n.date(stop.date, dateStyle: .long))
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.82))
                         }

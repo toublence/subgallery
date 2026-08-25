@@ -1,29 +1,109 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Scheme LastUpgradeVersion="2610" version="1.7">
-   <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES" buildArchitectures="Automatic">
+<Scheme
+   LastUpgradeVersion = "1430"
+   version = "1.7">
+   <BuildAction
+      parallelizeBuildables = "YES"
+      buildImplicitDependencies = "YES"
+      runPostActionsOnFailure = "NO">
       <BuildActionEntries>
-         <BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="NO" buildForAnalyzing="YES">
-            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="285CBCD187EA3121577D8D2C" BuildableName="SubGallery.app" BlueprintName="SubGallery" ReferencedContainer="container:SubGallery.xcodeproj"/>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "285CBCD187EA3121577D8D2C"
+               BuildableName = "SubGallery.app"
+               BlueprintName = "SubGallery"
+               ReferencedContainer = "container:SubGallery.xcodeproj">
+            </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
-   <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES" shouldAutocreateTestPlan="YES">
+   <TestAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      onlyGenerateCoverageForSpecifiedTargets = "NO">
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "285CBCD187EA3121577D8D2C"
+            BuildableName = "SubGallery.app"
+            BlueprintName = "SubGallery"
+            ReferencedContainer = "container:SubGallery.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
       <Testables>
-         <TestableReference skipped="NO">
-            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="F96E838A4C99EB7E93F3719F" BuildableName="SubGalleryTests.xctest" BlueprintName="SubGalleryTests" ReferencedContainer="container:SubGallery.xcodeproj"/>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "F96E838A4C99EB7E93F3719F"
+               BuildableName = "SubGalleryTests.xctest"
+               BlueprintName = "SubGalleryTests"
+               ReferencedContainer = "container:SubGallery.xcodeproj">
+            </BuildableReference>
          </TestableReference>
       </Testables>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </TestAction>
-   <LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="YES">
-      <BuildableProductRunnable runnableDebuggingMode="0">
-         <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="285CBCD187EA3121577D8D2C" BuildableName="SubGallery.app" BlueprintName="SubGallery" ReferencedContainer="container:SubGallery.xcodeproj"/>
+   <LaunchAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      language = "ko"
+      region = "KR"
+      launchStyle = "0"
+      useCustomWorkingDirectory = "NO"
+      ignoresPersistentStateOnLaunch = "NO"
+      debugDocumentVersioning = "YES"
+      debugServiceExtension = "internal"
+      allowLocationSimulation = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "285CBCD187EA3121577D8D2C"
+            BuildableName = "SubGallery.app"
+            BlueprintName = "SubGallery"
+            ReferencedContainer = "container:SubGallery.xcodeproj">
+         </BuildableReference>
       </BuildableProductRunnable>
-      <StoreKitConfigurationFileReference identifier="../../StoreKit/Products.storekit"/>
+      <CommandLineArguments>
+      </CommandLineArguments>
+      <StoreKitConfigurationFileReference
+         identifier = "../../StoreKit/Products.storekit">
+      </StoreKitConfigurationFileReference>
    </LaunchAction>
-   <ProfileAction buildConfiguration="Release" shouldUseLaunchSchemeArgsEnv="YES" savedToolIdentifier="" useCustomWorkingDirectory="NO" debugDocumentVersioning="YES">
-      <BuildableProductRunnable runnableDebuggingMode="0">
-         <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="285CBCD187EA3121577D8D2C" BuildableName="SubGallery.app" BlueprintName="SubGallery" ReferencedContainer="container:SubGallery.xcodeproj"/>
+   <ProfileAction
+      buildConfiguration = "Release"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      savedToolIdentifier = ""
+      useCustomWorkingDirectory = "NO"
+      debugDocumentVersioning = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "285CBCD187EA3121577D8D2C"
+            BuildableName = "SubGallery.app"
+            BlueprintName = "SubGallery"
+            ReferencedContainer = "container:SubGallery.xcodeproj">
+         </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>
-   <AnalyzeAction buildConfiguration="Debug"/>
+   <AnalyzeAction
+      buildConfiguration = "Debug">
+   </AnalyzeAction>
+   <ArchiveAction
+      buildConfiguration = "Release"
+      revealArchiveInOrganizer = "YES">
+   </ArchiveAction>
 </Scheme>

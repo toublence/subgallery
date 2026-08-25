@@ -113,6 +113,9 @@ enum MediaExportService {
 
 struct ActivityShareSheet: UIViewControllerRepresentable {
     let urls: [URL]
+    /// Lets QR payloads be shared as plain text through the same sheet the media
+    /// export path already uses.
+    var text: String? = nil
     var onComplete: ((Bool) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
@@ -120,7 +123,8 @@ struct ActivityShareSheet: UIViewControllerRepresentable {
     }
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        let controller = UIActivityViewController(activityItems: urls, applicationActivities: nil)
+        let items: [Any] = urls.isEmpty ? [text].compactMap { $0 } : urls
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
         controller.completionWithItemsHandler = { _, completed, _, _ in
             DispatchQueue.main.async { context.coordinator.onComplete?(completed) }
         }

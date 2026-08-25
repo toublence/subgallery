@@ -207,6 +207,7 @@ struct MediaViewer: View {
                 }
             }
         }
+        qrContentActions(for: item)
         if hasPremiumSmartContent(item), !purchases.isPremium {
             Button { showsPremium = true } label: {
                 Label(L10n.text("사진 속 정보 사용"), systemImage: "lock.fill")
@@ -214,6 +215,39 @@ struct MediaViewer: View {
         }
         if purchases.isPremium {
             premiumContentActions(for: item)
+        }
+    }
+
+    /// QR is SubGallery's baseline value, not an upsell: reading a code and acting
+    /// on it works without Premium. Premium differentiates on the workflow built
+    /// around QR, not on access to the payload.
+    @ViewBuilder
+    private func qrContentActions(for item: MediaItem) -> some View {
+        ForEach(item.qrContents) { info in
+            Menu(info.type.title) {
+                Button {
+                    if let error = QRActionRunner.perform(info, for: item, in: modelContext) {
+                        actionMessage = error
+                    }
+                } label: {
+                    Label(info.primaryAction.title, systemImage: info.primaryAction.symbol)
+                }
+                Button {
+                    if let error = QRActionRunner.perform(info, for: item, in: modelContext) {
+                        actionMessage = error
+                    } else {
+                        finish(item)
+                    }
+                } label: {
+                    Label(L10n.format("%@ 후 완료", info.primaryAction.title), systemImage: "checkmark.circle")
+                }
+                Button { MediaActionService.copy(info.rawValue) } label: {
+                    Label(L10n.text("내용 복사"), systemImage: "doc.on.doc")
+                }
+                Button { copyAndFinish(info.rawValue, item: item) } label: {
+                    Label(L10n.text("복사하고 완료"), systemImage: "checkmark.circle")
+                }
+            }
         }
     }
 
@@ -264,15 +298,6 @@ struct MediaViewer: View {
                 }
             }
         }
-        if let value = item.detectedQRCodes.first {
-            Menu(L10n.text("QR 코드")) {
-                if URL(string: value)?.scheme != nil {
-                    Button { openURL(value, item: item, completeAfter: false) } label: { Label(L10n.text("QR 열기"), systemImage: "qrcode") }
-                    Button { openURL(value, item: item, completeAfter: true) } label: { Label(L10n.text("열고 완료"), systemImage: "checkmark.circle") }
-                }
-                Button { MediaActionService.copy(value) } label: { Label(L10n.text("내용 복사"), systemImage: "doc.on.doc") }
-            }
-        }
         if hasPremiumSmartContent(item) {
             Button { showsCompleteConfirmation = true } label: {
                 Label(L10n.text("처리 완료"), systemImage: "checkmark.circle.fill")
@@ -306,8 +331,14 @@ struct MediaViewer: View {
     @ViewBuilder
     private func representativeActionButton(for item: MediaItem) -> some View {
         let action = representativeAction(for: item)
-        Button { perform(action, for: item) } label: {
-            Label(representativeTitle(action), systemImage: representativeSymbol(action))
+        // A QR's button names what will actually happen — 전화, 지도, 복사 — rather
+        // than a generic "QR 열기" that may not be an open at all.
+        let qr = action == .openQR ? item.primaryQRContent : nil
+        return Button { perform(action, for: item) } label: {
+            Label(
+                qr?.primaryAction.title ?? representativeTitle(action),
+                systemImage: qr?.primaryAction.symbol ?? representativeSymbol(action)
+            )
         }
     }
 
@@ -316,15 +347,15 @@ struct MediaViewer: View {
         case .shareAndComplete: return .shareAndComplete
         case .findCar where item.latitude != nil && item.longitude != nil: return .findCar
         case .copyAndComplete where purchases.isPremium && !item.recognizedText.isEmpty: return .copyAndComplete
-        case .open where purchases.isPremium && !item.detectedQRCodes.isEmpty: return .openQR
+        case .open where !item.detectedQRCodes.isEmpty: return .openQR
         case .open where purchases.isPremium && !item.detectedURLs.isEmpty: return .openURL
         case .addEvent where purchases.isPremium && !item.detectedDates.isEmpty: return .addEvent
         default: break
         }
         if item.purpose == .parking, item.latitude != nil, item.longitude != nil { return .findCar }
         if item.purpose == .receipt { return .shareAndComplete }
-        guard purchases.isPremium else { return .shareAndComplete }
         if !item.detectedQRCodes.isEmpty { return .openQR }
+        guard purchases.isPremium else { return .shareAndComplete }
         if !item.detectedURLs.isEmpty { return .openURL }
         if !item.detectedDates.isEmpty { return .addEvent }
         if !item.detectedPhoneNumbers.isEmpty { return .call }
@@ -332,13 +363,14 @@ struct MediaViewer: View {
         return .shareAndComplete
     }
 
+    /// QR is deliberately absent here: it is free, so a QR-only photo must not
+    /// show the Premium upsell.
     private func hasPremiumSmartContent(_ item: MediaItem) -> Bool {
         hasReceiptDetails(item)
             || !item.detectedURLs.isEmpty
             || !item.detectedPhoneNumbers.isEmpty
             || !item.detectedAddresses.isEmpty
             || !item.detectedDates.isEmpty
-            || !item.detectedQRCodes.isEmpty
     }
 
     private func hasReceiptDetails(_ item: MediaItem) -> Bool {
@@ -356,7 +388,7 @@ struct MediaViewer: View {
                         .font(.subheadline.weight(.semibold))
                     HStack(spacing: 8) {
                         if let date = item.receiptDate {
-                            Text(date.formatted(date: .numeric, time: .omitted))
+                            Text(L10n.date(date, dateStyle: .numeric, timeStyle: .omitted))
                         }
                         if !item.receiptAmount.isEmpty { Text(item.receiptAmount) }
                     }
@@ -405,9 +437,11 @@ struct MediaViewer: View {
         case .openURL:
             if let value = item.detectedURLs.first { openURL(value, item: item, completeAfter: false) }
         case .openQR:
-            if let value = item.detectedQRCodes.first {
-                if URL(string: value)?.scheme != nil { openURL(value, item: item, completeAfter: false) }
-                else { MediaActionService.copy(value) }
+            // Routed through the parser so a Wi-Fi or contact payload copies instead
+            // of being handed to Safari as if it were a link.
+            if let info = item.primaryQRContent,
+               let error = QRActionRunner.perform(info, for: item, in: modelContext) {
+                actionMessage = error
             }
         case .addEvent:
             if let date = item.detectedDates.first { addCalendarEvent(date, item: item, completeAfter: false) }
@@ -625,15 +659,15 @@ struct MediaInfoView: View {
     var body: some View {
         NavigationStack {
             List {
-                LabeledContent("촬영 날짜", value: item.createdAt.formatted(date: .abbreviated, time: .shortened))
-                LabeledContent("가져온 날짜", value: item.importedAt.formatted(date: .abbreviated, time: .shortened))
+                LabeledContent(L10n.text("촬영 날짜"), value: L10n.date(item.createdAt))
+                LabeledContent(L10n.text("가져온 날짜"), value: L10n.date(item.importedAt))
                 LabeledContent("크기", value: ByteCountFormatter.string(fromByteCount: item.fileSize, countStyle: .file))
                 LabeledContent("해상도", value: "\(item.width) × \(item.height)")
                 LabeledContent("파일 형식", value: URL(fileURLWithPath: item.localPath).pathExtension.uppercased())
                 if item.kind == .video { LabeledContent("길이", value: Duration.seconds(item.duration).formatted(.time(pattern: .minuteSecond))) }
                 LabeledContent("보관 상태", value: RetentionService.statusText(for: item))
                 if item.isPinned { LabeledContent("고정", value: L10n.text("켜짐")) }
-                if let reminder = item.reminderDate { LabeledContent("다시 알림", value: reminder.formatted(date: .abbreviated, time: .shortened)) }
+                if let reminder = item.reminderDate { LabeledContent(L10n.text("다시 알림"), value: L10n.date(reminder)) }
                 if item.kind == .photo {
                     LabeledContent("텍스트 인식", value: ocrStatusText)
                     if !item.recognizedText.isEmpty {

@@ -41,6 +41,25 @@ enum MediaActionService {
         UIApplication.shared.open(url)
     }
 
+    static func openMail(_ address: String) throws {
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "mailto:\(encoded)") else {
+            throw MediaActionError.invalidValue
+        }
+        UIApplication.shared.open(url)
+    }
+
+    static func openMessage(_ number: String) throws {
+        let allowed = CharacterSet(charactersIn: "+0123456789")
+        let normalized = String(number.unicodeScalars.filter(allowed.contains))
+        guard !normalized.isEmpty, let url = URL(string: "sms:\(normalized)") else {
+            throw MediaActionError.invalidValue
+        }
+        UIApplication.shared.open(url)
+    }
+
     static func openAddress(_ address: String) throws {
         guard let encoded = address.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: "https://maps.apple.com/?q=\(encoded)") else {
