@@ -12,6 +12,21 @@ private enum RepresentativeMediaAction {
     case call
 }
 
+enum MediaViewerContentAccessPolicy {
+    static func hasReceiptDetails(_ item: MediaItem) -> Bool {
+        !item.receiptMerchant.isEmpty || !item.receiptAmount.isEmpty || item.receiptDate != nil
+    }
+
+    /// Receipt details and QR payloads are baseline features. Only OCR-derived
+    /// follow-up actions that launch another app belong behind Premium.
+    static func hasPremiumSmartContent(_ item: MediaItem) -> Bool {
+        !item.detectedURLs.isEmpty
+            || !item.detectedPhoneNumbers.isEmpty
+            || !item.detectedAddresses.isEmpty
+            || !item.detectedDates.isEmpty
+    }
+}
+
 struct MediaViewer: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -58,9 +73,8 @@ struct MediaViewer: View {
             .background(.black)
             .overlay(alignment: .bottom) {
                 if let current,
-                   purchases.isPremium,
                    !isRecentlyDeleted,
-                   hasReceiptDetails(current) {
+                   MediaViewerContentAccessPolicy.hasReceiptDetails(current) {
                     receiptSummary(for: current)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 54)
@@ -205,8 +219,9 @@ struct MediaViewer: View {
                 }
             }
         }
+        receiptContentActions(for: item)
         qrContentActions(for: item)
-        if hasPremiumSmartContent(item), !purchases.isPremium {
+        if MediaViewerContentAccessPolicy.hasPremiumSmartContent(item), !purchases.isPremium {
             Button {
                 premiumEntryPoint = .ocrSmartActions
                 showsPremium = true
@@ -216,6 +231,22 @@ struct MediaViewer: View {
         }
         if purchases.isPremium {
             premiumContentActions(for: item)
+        }
+    }
+
+    @ViewBuilder
+    private func receiptContentActions(for item: MediaItem) -> some View {
+        if MediaViewerContentAccessPolicy.hasReceiptDetails(item) {
+            Menu(L10n.text("영수증 정보")) {
+                if !item.receiptAmount.isEmpty {
+                    Button { MediaActionService.copy(item.receiptAmount) } label: {
+                        Label(L10n.text("금액 복사"), systemImage: "doc.on.doc")
+                    }
+                }
+                Button { showsReceiptEditor = true } label: {
+                    Label(L10n.text("정보 수정"), systemImage: "pencil")
+                }
+            }
         }
     }
 
@@ -254,18 +285,6 @@ struct MediaViewer: View {
 
     @ViewBuilder
     private func premiumContentActions(for item: MediaItem) -> some View {
-        if hasReceiptDetails(item) {
-            Menu(L10n.text("영수증 정보")) {
-                if !item.receiptAmount.isEmpty {
-                    Button { MediaActionService.copy(item.receiptAmount) } label: {
-                        Label(L10n.text("금액 복사"), systemImage: "doc.on.doc")
-                    }
-                }
-                Button { showsReceiptEditor = true } label: {
-                    Label(L10n.text("정보 수정"), systemImage: "pencil")
-                }
-            }
-        }
         if let value = item.detectedURLs.first {
             Menu(L10n.text("URL")) {
                 Button { openURL(value, item: item, completeAfter: false) } label: { Label(L10n.text("Safari에서 열기"), systemImage: "safari") }
@@ -299,7 +318,7 @@ struct MediaViewer: View {
                 }
             }
         }
-        if hasPremiumSmartContent(item) {
+        if MediaViewerContentAccessPolicy.hasPremiumSmartContent(item) {
             Button { showsCompleteConfirmation = true } label: {
                 Label(L10n.text("처리 완료"), systemImage: "checkmark.circle.fill")
             }
@@ -360,20 +379,6 @@ struct MediaViewer: View {
         if !item.detectedPhoneNumbers.isEmpty { return .call }
         if !item.recognizedText.isEmpty { return .copyAndComplete }
         return .shareAndComplete
-    }
-
-    /// QR is deliberately absent here: it is free, so a QR-only photo must not
-    /// show the Premium upsell.
-    private func hasPremiumSmartContent(_ item: MediaItem) -> Bool {
-        hasReceiptDetails(item)
-            || !item.detectedURLs.isEmpty
-            || !item.detectedPhoneNumbers.isEmpty
-            || !item.detectedAddresses.isEmpty
-            || !item.detectedDates.isEmpty
-    }
-
-    private func hasReceiptDetails(_ item: MediaItem) -> Bool {
-        !item.receiptMerchant.isEmpty || !item.receiptAmount.isEmpty || item.receiptDate != nil
     }
 
     private func receiptSummary(for item: MediaItem) -> some View {

@@ -287,8 +287,7 @@
 "문서를 저장할 수 없습니다." = "Impossible d’enregistrer le document.";
 "보정" = "Ajuster";
 "사진을 하나의 문서로 만드세요." = "Transformez vos photos en un document.";
-"여러 장의 문서 사진을 순서대로 정리해 검색 가능한 PDF로 만듭니다." = "Classez plusieurs photos de documents et créez un PDF consultable.";
-"여러 페이지를 정리하고 OCR이 적용된 PDF로 만들어 언제든 검색하고 공유하세요." = "Organisez les pages, créez un PDF avec OCR et partagez-le à tout moment.";
+"여러 장의 문서 사진을 정리해 하나의 PDF로 만들고, OCR로 문서 내용을 인식합니다." = "Regroupez plusieurs photos de documents dans un seul PDF et reconnaissez leur contenu par OCR.";
 "이 문서를 삭제할까요?" = "Supprimer ce document ?";
 "전체 복사" = "Tout copier";
 "컬러 문서" = "Document couleur";

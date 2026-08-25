@@ -4,6 +4,23 @@ import StoreKit
 import SwiftData
 import SwiftUI
 
+enum SettingsPendingPremiumAction: Equatable {
+    case enableICloud
+    case enableMetadataRemoval
+    case openCapturePresets
+}
+
+enum SettingsPremiumResumePolicy {
+    static func actionToResume(
+        wasPremium: Bool,
+        isPremium: Bool,
+        pendingAction: SettingsPendingPremiumAction?
+    ) -> SettingsPendingPremiumAction? {
+        guard !wasPremium, isPremium else { return nil }
+        return pendingAction
+    }
+}
+
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.requestReview) private var requestReview
@@ -30,6 +47,8 @@ struct SettingsView: View {
     @State private var showsPINVerification = false
     @State private var showsPremium = false
     @State private var premiumEntryPoint = PremiumEntryPoint.general
+    @State private var pendingPremiumAction: SettingsPendingPremiumAction?
+    @State private var showsCapturePresets = false
     @State private var iCloudError: String?
 
     private let retentionOptions: [RetentionPolicy] = [
@@ -111,6 +130,7 @@ struct SettingsView: View {
                         NavigationLink(L10n.text("촬영 프리셋")) { CapturePresetListView() }
                     } else {
                         Button {
+                            pendingPremiumAction = .openCapturePresets
                             premiumEntryPoint = .capturePreset
                             showsPremium = true
                         } label: {
@@ -152,6 +172,9 @@ struct SettingsView: View {
                         .padding(.top, 8)
                 }
             }
+            .navigationDestination(isPresented: $showsCapturePresets) {
+                CapturePresetListView()
+            }
             .navigationTitle(L10n.text("설정"))
             .id(appLanguage)
             .navigationBarTitleDisplayMode(.inline)
@@ -187,11 +210,22 @@ struct SettingsView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showsPremium) {
+            .sheet(isPresented: $showsPremium, onDismiss: {
+                if !purchases.isPremium { pendingPremiumAction = nil }
+            }) {
                 PremiumView(entryPoint: premiumEntryPoint).presentationDetents([.large])
             }
-            .onChange(of: purchases.isPremium) { _, isPremium in
-                if isPremium, showsPremium { showsPremium = false }
+            .onChange(of: purchases.isPremium) { wasPremium, isPremium in
+                guard let action = SettingsPremiumResumePolicy.actionToResume(
+                    wasPremium: wasPremium,
+                    isPremium: isPremium,
+                    pendingAction: pendingPremiumAction
+                ) else { return }
+                pendingPremiumAction = nil
+                showsPremium = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    resumePremiumAction(action)
+                }
             }
             .alert(L10n.text("iCloud를 사용할 수 없음"), isPresented: Binding(
                 get: { iCloudError != nil },
@@ -229,6 +263,7 @@ struct SettingsView: View {
             get: { stripsMetadata },
             set: { enabled in
                 guard !enabled || purchases.isPremium else {
+                    pendingPremiumAction = .enableMetadataRemoval
                     premiumEntryPoint = .privacyExport
                     showsPremium = true
                     return
@@ -303,6 +338,7 @@ struct SettingsView: View {
             set: { enabled in
                 if enabled {
                     guard purchases.isPremium else {
+                        pendingPremiumAction = .enableICloud
                         premiumEntryPoint = .iCloudSync
                         showsPremium = true
                         return
@@ -336,6 +372,17 @@ struct SettingsView: View {
                 iCloudStatus = "error"
                 iCloudError = error.localizedDescription
             }
+        }
+    }
+
+    private func resumePremiumAction(_ action: SettingsPendingPremiumAction) {
+        switch action {
+        case .enableICloud:
+            enableICloudSync()
+        case .enableMetadataRemoval:
+            stripsMetadata = true
+        case .openCapturePresets:
+            showsCapturePresets = true
         }
     }
 

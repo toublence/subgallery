@@ -231,7 +231,7 @@ final class CoreFeatureTests: XCTestCase {
         let persisted = try XCTUnwrap(try context.fetch(FetchDescriptor<MediaItem>()).first)
         XCTAssertTrue(persisted.waitingForCompletion)
         XCTAssertEqual(persisted.expirationType, .untilComplete)
-        XCTAssertEqual(RetentionService.statusText(for: persisted), "완료 대기")
+        XCTAssertEqual(RetentionService.statusText(for: persisted), L10n.text("완료 대기"))
 
         persisted.reminderDate = .now
         persisted.reminderIdentifier = "media.\(persisted.id.uuidString)"
@@ -326,6 +326,62 @@ final class CoreFeatureTests: XCTestCase {
         XCTAssertEqual(PremiumFeatureCatalog.feature(.cleanupCenter).accessPolicy, .premium)
         XCTAssertFalse(PurchaseManager.productIDs.contains(PurchaseManager.lifetimeID))
         XCTAssertTrue(PurchaseManager.entitlementProductIDs.contains(PurchaseManager.lifetimeID))
+    }
+
+    func testMediaViewerReceiptAndQRBaselineActionsDoNotTriggerPremiumUpsell() {
+        let receipt = MediaItem(kind: .photo, source: .files, localPath: "Media/receipt.jpg")
+        receipt.receiptMerchant = "중부식자재마트"
+        receipt.receiptAmount = "₩15,100"
+        receipt.receiptDate = Date(timeIntervalSince1970: 1_787_184_000)
+
+        XCTAssertTrue(MediaViewerContentAccessPolicy.hasReceiptDetails(receipt))
+        XCTAssertFalse(MediaViewerContentAccessPolicy.hasPremiumSmartContent(receipt))
+
+        let qr = MediaItem(kind: .photo, source: .files, localPath: "Media/qr.jpg")
+        qr.detectedQRCodes = ["https://example.com"]
+        XCTAssertFalse(MediaViewerContentAccessPolicy.hasPremiumSmartContent(qr))
+    }
+
+    func testMediaViewerLocksOnlyReceiptFollowUpSmartActions() {
+        let receipt = MediaItem(kind: .photo, source: .files, localPath: "Media/receipt-url.jpg")
+        receipt.receiptMerchant = "중부식자재마트"
+        receipt.receiptAmount = "₩15,100"
+        receipt.detectedURLs = ["https://example.com/receipt"]
+
+        XCTAssertTrue(MediaViewerContentAccessPolicy.hasReceiptDetails(receipt))
+        XCTAssertTrue(MediaViewerContentAccessPolicy.hasPremiumSmartContent(receipt))
+    }
+
+    func testDocumentPaywallCopyDoesNotClaimSearchablePDF() {
+        let detail = PremiumFeatureCatalog.feature(.documentBuilder).detailKey
+        XCTAssertFalse(detail.contains(["검색", "가능한", "PDF"].joined(separator: " ")))
+        XCTAssertTrue(detail.contains("OCR"))
+    }
+
+    func testSettingsPendingPremiumActionsResumeOnlyOnNewEntitlement() {
+        let actions: [SettingsPendingPremiumAction] = [
+            .enableICloud, .enableMetadataRemoval, .openCapturePresets
+        ]
+        for action in actions {
+            XCTAssertEqual(
+                SettingsPremiumResumePolicy.actionToResume(
+                    wasPremium: false,
+                    isPremium: true,
+                    pendingAction: action
+                ),
+                action
+            )
+            XCTAssertNil(SettingsPremiumResumePolicy.actionToResume(
+                wasPremium: false,
+                isPremium: false,
+                pendingAction: action
+            ))
+            XCTAssertNil(SettingsPremiumResumePolicy.actionToResume(
+                wasPremium: true,
+                isPremium: true,
+                pendingAction: action
+            ))
+        }
     }
 
     func testPremiumBackfillUsesCompletedOCRForClassificationAndReceiptExtraction() async throws {

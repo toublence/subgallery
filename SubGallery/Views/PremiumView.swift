@@ -323,7 +323,7 @@ enum PremiumFeatureCatalog {
         case .documentBuilder:
             PremiumFeatureDescriptor(
                 id: id, symbol: "doc.badge.plus", titleKey: "문서 만들기 무제한",
-                detailKey: "여러 장의 문서 사진을 순서대로 정리해 검색 가능한 PDF로 만듭니다.",
+                detailKey: "여러 장의 문서 사진을 정리해 하나의 PDF로 만들고, OCR로 문서 내용을 인식합니다.",
                 accessPolicy: .trial(limit: 3)
             )
         case .qrBuilder:
@@ -574,7 +574,7 @@ struct PremiumView: View {
         switch entryPoint {
         case .receiptReport: "지출 흐름, 자주 결제한 곳, 큰 결제와 기간별 변화를 제한 없이 확인하세요."
         case .travelMap: "촬영한 장소와 여행의 흐름을 지도와 타임라인으로 계속 확인하세요."
-        case .documentBuilder: "여러 페이지를 정리하고 OCR이 적용된 PDF로 만들어 언제든 검색하고 공유하세요."
+        case .documentBuilder: "여러 장의 문서 사진을 정리해 하나의 PDF로 만들고, OCR로 문서 내용을 인식합니다."
         case .qrBuilder: "웹사이트, Wi-Fi, 연락처, 위치 등 자주 쓰는 정보를 QR로 만들고 언제든 바로 보여주세요."
         case .albumAutomation: "완료된 사진과 오래된 사진을 자동으로 관리하고, 정리가 필요한 항목을 한눈에 확인하세요."
         case .cleanupCenter, .iCloudSync, .capturePreset, .privacyExport, .ocrSmartActions:
