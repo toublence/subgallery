@@ -13,7 +13,7 @@ settings:
     DEVELOPMENT_TEAM: 2CZQR7Q423
     CODE_SIGN_STYLE: Automatic
     CURRENT_PROJECT_VERSION: 1
-    MARKETING_VERSION: 1.0
+    MARKETING_VERSION: 1.0.1
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
 schemes:
   SubGallery:
@@ -70,6 +70,10 @@ targets:
       path: SubGallery/Resources/Info.plist
       properties:
         CFBundleDisplayName: SubGallery
+        # Referenced, not hardcoded: without these the generated plist carries a
+        # literal 1.0 that silently wins over the version set in Xcode.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleDevelopmentRegion: en
         CFBundleLocalizations:
           - en
